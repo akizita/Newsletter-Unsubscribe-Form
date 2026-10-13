@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="theme-color" content="#0b0b0b" />
+    <meta name="description" content="Update your OPG newsletter preferences." />
+    <title>Unsubscribe | OPG Newsletter</title>
+  </head>
+  <body>
+    <main class="page-shell">
+      <div class="ambient ambient-one" aria-hidden="true"></div>
+      <div class="ambient ambient-two" aria-hidden="true"></div>
+
+      <section class="preference-card" aria-labelledby="page-title">
+        <header class="card-header">
+          <div class="brand">
+            <img class="brand-mark" src="/assets/opg-logo.png" width="54" height="54" alt="" />
+            <span class="brand-name">OPG</span>
+          </div>
+          <span class="eyebrow">NEWSLETTER PREFERENCES</span>
+          <h1 id="page-title">Say goodbye to the newsletter</h1>
+          <p class="intro">You can unsubscribe in one step. If you have a moment, your feedback will help us make future outreach more useful.</p>
+        </header>
+
+        <div id="initializing" class="state-panel" role="status" aria-live="polite">
+          <span class="spinner" aria-hidden="true"></span>
+          <p>Checking your link…</p>
+        </div>
+
+        <div id="invalid-state" class="state-panel" role="alert" hidden>
+          <span class="state-icon" aria-hidden="true">!</span>
+          <h2>We can’t use this link</h2>
+          <p>This unsubscribe link is invalid or has expired. Please contact OPG for assistance.</p>
+        </div>
+
+        <div id="success-state" class="state-panel success-panel" aria-live="polite" hidden>
+          <span class="state-icon success-icon" aria-hidden="true">✓</span>
+          <h2>You’re all set</h2>
+          <p>You will no longer receive OPG newsletter emails. Thank you for helping us improve our outreach.</p>
+        </div>
+
+        <form id="preference-form" novalidate hidden>
+          <div class="form-heading">
+            <h2>Your feedback <span>(optional)</span></h2>
+            <p>Skip these questions if you’d prefer to unsubscribe now.</p>
+          </div>
+
+          <div class="field">
+            <label for="reason">What made you unsubscribe today?</label>
+            <select id="reason" name="reason">
+              <option value="">Select a reason (optional)</option>
+              <option>Not looking for opportunities or talent right now</option>
+              <option>The content is not relevant to me</option>
+              <option>I receive emails too often</option>
+              <option>I have already found a role or filled my hiring need</option>
+              <option>I prefer another communication channel</option>
+              <option>I do not remember subscribing</option>
+              <option>Other</option>
+            </select>
+          </div>
+
+          <div id="other-reason-field" class="field conditional-field" hidden>
+            <label for="other-reason">Please tell us a little more <span class="optional">(optional)</span></label>
+            <textarea id="other-reason" name="otherReason" maxlength="500" rows="3" placeholder="Share anything you'd like us to know"></textarea>
+            <p class="field-hint">Up to 500 characters.</p>
+          </div>
+
+          <div class="field">
+            <label for="future-contact">If the hiring landscape changes, may OPG contact you again?</label>
+            <select id="future-contact" name="futureContact" aria-describedby="future-contact-hint">
+              <option value="">Select an answer (optional)</option>
+              <option>Yes</option>
+              <option>No</option>
+            </select>
+            <p id="future-contact-hint" class="field-hint">Choosing “Yes” records your future contact preference. It does not resubscribe you to the newsletter today.</p>
+          </div>
+
+          <div class="honeypot" aria-hidden="true">
+            <label for="website">Website</label>
+            <input id="website" name="website" type="text" tabindex="-1" autocomplete="off" />
+          </div>
+
+          <p id="form-error" class="form-error" role="alert" hidden></p>
+
+          <button id="submit-button" class="primary-button" type="submit" disabled>
+            <span class="button-label">Unsubscribe</span>
+            <span class="button-arrow" aria-hidden="true">→</span>
+          </button>
+          <p class="submit-note">Your newsletter subscription will end even if you leave the feedback blank.</p>
+        </form>
+      </section>
+      <p class="footer-note">OPG · Newsletter preferences</p>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

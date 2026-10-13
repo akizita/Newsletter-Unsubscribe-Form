@@ -307,7 +307,7 @@ Re-enable the button so the recipient can retry.
 
 ```http
 POST /webhook/opg-newsletter-preferences
-Content-Type: application/json
+Content-Type: text/plain;charset=UTF-8
 ```
 
 ```json
@@ -324,6 +324,11 @@ Content-Type: application/json
 ```
 
 `website` is a honeypot field. It must remain empty for real users.
+
+The body is a JSON string sent as plain text to avoid the browser's cross-origin
+`OPTIONS` preflight against n8n. The n8n validation node parses it as JSON.
+If a same-origin proxy is added later, the transport may use
+`application/json` without changing the payload fields.
 
 Do not send an email field from the frontend. n8n must derive the email from the validated token.
 
@@ -524,6 +529,20 @@ If the recipient submits the same request more than once, either:
 - Keep all responses but add a unique request identifier.
 
 Updating one response per recipient and campaign is recommended for the MVP.
+Use a stable `response_key` column based on recipient ID and campaign ID for
+the upsert. Escape optional free text before writing it to Google Sheets so
+formula-like input is stored as text.
+
+#### 6a. Suppress future newsletter sends
+
+The newsletter platform must honor the `unsubscribed` status before the next
+campaign, either by syncing the status to its suppression list or by using the
+`Recipients` sheet as its authoritative send list. A Sheets update alone does
+not stop a separate email platform from sending. The integration method depends
+on OPG's newsletter provider.
+For the MVP, keep one `Recipients` row per person with a global unsubscribe
+status. If rows are kept per campaign, suppression must be checked across all
+rows for the recipient.
 
 #### 7. Success response
 
@@ -677,6 +696,7 @@ The MVP is complete when all of the following are true:
 - The recipient token is validated by n8n.
 - n8n retrieves the correct email from Google Sheets.
 - The recipient is marked as unsubscribed.
+- The newsletter platform suppresses unsubscribed recipients on subsequent sends.
 - The email and selected answers are stored in the `Responses` worksheet.
 - Repeated submissions do not create conflicting unsubscribe states.
 - Invalid links show a safe error without revealing personal data.
@@ -704,19 +724,20 @@ These features can be added later if the project grows.
 
 ## 18. Final implementation checklist
 
-- [ ] Create Vite vanilla project
-- [ ] Add OPG logo to `public/assets`
-- [ ] Build responsive form UI
-- [ ] Add glassmorphism styling
-- [ ] Add dropdown options
-- [ ] Add conditional `Other` textarea
-- [ ] Add URL-token handling
-- [ ] Add loading and error states
+- [x] Create Vite vanilla project
+- [x] Add OPG logo to `public/assets`
+- [x] Build responsive form UI
+- [x] Add glassmorphism styling
+- [x] Add dropdown options
+- [x] Add conditional `Other` textarea
+- [x] Add URL-token handling
+- [x] Add loading and error states
 - [ ] Create Google Sheets worksheets
 - [ ] Generate recipient tokens
 - [ ] Create n8n webhook workflow
 - [ ] Add token lookup
 - [ ] Add unsubscribe update
+- [ ] Connect unsubscribe status to the newsletter platform's suppression mechanism
 - [ ] Add feedback response storage
 - [ ] Add idempotency handling
 - [ ] Add honeypot and validation

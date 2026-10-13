@@ -1,0 +1,82 @@
+{
+  "name": "OPG — Newsletter Workflow Error Alert",
+  "nodes": [
+    {
+      "id": "ea216468-f9c0-4d14-a175-6e02db4338a9",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "450179e7-180f-4b24-a42b-cbe8539195c0",
+      "name": "Sanitize Error Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const event = $input.first().json;\nreturn [{ json: { workflow: event.workflow?.name || 'Unknown workflow', time: new Date().toISOString(), message: 'An OPG newsletter workflow failed. Review the restricted n8n execution log.' } }];"
+      }
+    },
+    {
+      "id": "5cc4f895-1ae0-40ed-a893-79fed7f7cd9a",
+      "name": "Email Internal Owner",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "fromEmail": "REPLACE_WITH_VERIFIED_SENDER_EMAIL",
+        "toEmail": "REPLACE_WITH_INTERNAL_ALERT_EMAIL",
+        "subject": "OPG newsletter workflow error",
+        "emailFormat": "text",
+        "text": "=Workflow: {{ $json.workflow }}\nTime: {{ $json.time }}\n{{ $json.message }}",
+        "options": {
+          "appendAttribution": false
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Sanitize Error Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sanitize Error Alert": {
+      "main": [
+        [
+          {
+            "node": "Email Internal Owner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "all",
+    "saveManualExecutions": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "active": false
+}
