@@ -304,7 +304,7 @@ form.addEventListener('submit', async (event) => {
       dropdownControllers.forEach((dropdown) => dropdown.lock());
       openModal({
         state: 'success',
-        title: 'Response saved',
+        title: 'Response Saved',
         message: 'Your response has been saved successfully.',
         action: 'Start again',
         returnFocus: caption,
