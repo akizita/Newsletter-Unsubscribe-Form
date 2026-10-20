@@ -1,116 +1,56 @@
-// These pure functions are embedded into n8n Code nodes by build-workflows.mjs.
-// Keep each function self-contained: the Code node cannot import this file.
-
-export function validateFormRequest(rawBody) {
-  const invalid = { valid: false, status: 400, message: 'Invalid form values.' };
+// These self-contained functions are embedded in n8n Code nodes by build-workflows.mjs.
+export function validateSurveyRequest(rawBody) {
+  const invalid = { valid: false };
   let body = rawBody;
-
   if (typeof body === 'string') {
     try { body = JSON.parse(body); } catch { return invalid; }
   }
   if (!body || typeof body !== 'object' || Array.isArray(body)) return invalid;
 
-  const keys = ['token', 'campaignId', 'reason', 'otherReason', 'futureContact', 'source', 'website'];
-  if (keys.some((key) => body[key] !== undefined && typeof body[key] !== 'string')) return invalid;
+  const keys = ['responseId', 'name', 'email', 'question1', 'question2', 'website'];
+  if (Object.keys(body).length !== keys.length) return invalid;
+  if (keys.some((key) => !Object.hasOwn(body, key) || typeof body[key] !== 'string')) return invalid;
 
-  const token = (body.token ?? '').trim();
-  const campaignId = (body.campaignId ?? '').trim();
-  const reason = body.reason ?? '';
-  const otherReason = (body.otherReason ?? '').trim();
-  const futureContact = body.futureContact ?? '';
-  const website = (body.website ?? '').trim();
+  const responseId = body.responseId.trim();
+  const name = body.name.trim();
+  const email = body.email.trim();
+  const question1 = body.question1;
+  const question2 = body.question2;
   const reasons = [
-    'Not looking for opportunities or talent right now',
-    'The content is not relevant to me',
-    'I receive emails too often',
-    'I have already found a role or filled my hiring need',
-    'I prefer another communication channel',
-    'I do not remember subscribing',
-    'Other',
+    'We already use a similar service/competitor.',
+    'We currently handle this in-house.',
+    'Budget constraints / Too expensive.',
+    'Not a priority at this time.',
+    "The service doesn't fit our current business needs.",
   ];
 
-  if (!token || token.length > 256 || /[\s\u0000-\u001f]/u.test(token)) return invalid;
-  if (campaignId.length > 128 || /[\u0000-\u001f]/u.test(campaignId)) return invalid;
-  if (website || !['', ...reasons].includes(reason)) return invalid;
-  if (!['', 'Yes', 'No'].includes(futureContact)) return invalid;
-  if (otherReason.length > 500 || (reason !== 'Other' && otherReason)) return invalid;
-  if (body.source !== 'newsletter-preference-page') return invalid;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(responseId)) return invalid;
+  if (!name || name.length > 120 || /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069<>]/u.test(name)) return invalid;
+  if (email.length > 254 || email.includes('..')) return invalid;
+  const parts = email.split('@');
+  if (parts.length !== 2) return invalid;
+  const [local, domain] = parts;
+  if (!local || local.length > 64 || local.startsWith('.') || local.endsWith('.')
+    || !/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+$/i.test(local)) return invalid;
+  const labels = domain.split('.');
+  if (labels.length < 2 || labels.some((label) => !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label))) return invalid;
+  if (!reasons.includes(question1) || !['Yes', 'No', 'Unsure'].includes(question2)) return invalid;
+  if (body.website.trim()) return invalid;
 
-  return { valid: true, token, campaignId, reason, otherReason, futureContact };
+  return { valid: true, responseId, name, email, question1, question2 };
 }
 
-export function validateOneClickRequest(request) {
-  const invalid = { valid: false, status: 400, message: 'Invalid unsubscribe request.' };
-  const token = request?.query?.token;
-  if (typeof token !== 'string' || !token || token.length > 256 || /[\s\u0000-\u001f]/u.test(token)) return invalid;
-  const body = request.body;
-  const confirmed = body === 'List-Unsubscribe=One-Click' || body?.['List-Unsubscribe'] === 'One-Click';
-  if (!confirmed) return invalid;
-  return { valid: true, token, campaignId: typeof request.query?.campaign === 'string' ? request.query.campaign : '' };
-}
-
-export function verifyRecipient(row, request, now = new Date()) {
-  const invalid = { valid: false, status: 401, message: 'This preference link is invalid or has expired.' };
-  if (!request?.valid || !row || row.token !== request.token) return invalid;
-
-  const recipientId = String(row.recipient_id ?? '').trim();
-  const email = String(row.email ?? '').trim();
-  const campaignId = String(row.campaign_id ?? '').trim();
-  if (!recipientId || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email)) return invalid;
-  if (campaignId && campaignId !== request.campaignId) return invalid;
-
-  const expiry = String(row.token_expires_at ?? '').trim();
-  if (expiry && (!Number.isFinite(Date.parse(expiry)) || Date.parse(expiry) <= now.getTime())) return invalid;
-
+export function prepareResponse(request, now = new Date()) {
+  if (!request?.valid) throw new Error('Survey request was not validated');
+  // Prevent names or email addresses beginning with formula characters from
+  // being interpreted as formulas by Google Sheets.
+  const asText = (value) => /^[=+\-@]/u.test(value) ? `'${value}` : value;
   return {
-    valid: true,
-    token: request.token,
-    recipientId,
-    email,
-    campaignId: campaignId || request.campaignId,
-    oldUnsubscribedAt: row.status === 'unsubscribed' ? String(row.unsubscribed_at ?? '') : '',
-    reason: request.reason ?? '',
-    otherReason: request.otherReason ?? '',
-    futureContact: request.futureContact ?? '',
-  };
-}
-
-export function prepareWrites(recipient, priorResponse, now = new Date()) {
-  if (!recipient?.valid) throw new Error('Recipient was not validated');
-
-  const timestamp = now.toISOString();
-  const unsubscribedAt = recipient.oldUnsubscribedAt || timestamp;
-  const responseKey = JSON.stringify([recipient.recipientId, recipient.campaignId]);
-  // Google Sheets can interpret user text starting with these characters as a formula.
-  const safeOtherReason = /^[=+\-@]/u.test(recipient.otherReason) ? `'${recipient.otherReason}` : recipient.otherReason;
-  const randomUuid = () => {
-    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (part) => {
-      const value = Math.floor(Math.random() * 16);
-      return (part === 'x' ? value : (value & 3) | 8).toString(16);
-    });
-  };
-
-  return {
-    recipient: {
-      token: recipient.token,
-      status: 'unsubscribed',
-      unsubscribed_at: unsubscribedAt,
-      updated_at: timestamp,
-    },
-    response: {
-      response_key: responseKey,
-      response_id: priorResponse?.response_id || randomUuid(),
-      recipient_id: recipient.recipientId,
-      email: recipient.email,
-      campaign_id: recipient.campaignId,
-      reason: recipient.reason,
-      other_reason: safeOtherReason,
-      future_contact: recipient.futureContact,
-      unsubscribe_status: 'unsubscribed',
-      unsubscribed_at: unsubscribedAt,
-      feedback_submitted_at: timestamp,
-      source: 'newsletter-preference-page',
-    },
+    response_id: request.responseId,
+    email: asText(request.email),
+    name: asText(request.name),
+    question1: request.question1,
+    question2: request.question2,
+    submitted_at: now.toISOString(),
   };
 }

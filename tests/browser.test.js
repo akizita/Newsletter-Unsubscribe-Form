@@ -1,81 +1,333 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync } from 'node:fs';
+import { createServer as createHttpServer } from 'node:http';
 import { join } from 'node:path';
 import { chromium } from 'playwright-core';
 import { createServer } from 'vite';
 
 const chromePath = process.env.CHROME_PATH || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-const webhook = 'https://n8n.example/webhook/opg-newsletter-preferences';
+const viewports = [
+  { width: 1366, height: 768 },
+  { width: 390, height: 844 },
+  { width: 320, height: 568 },
+  { width: 320, height: 480 },
+  { width: 667, height: 375 },
+];
 
-test('browser flow at 320px: optional feedback, retry, success and invalid link', { skip: !existsSync(chromePath) }, async () => {
-  process.env.VITE_N8N_WEBHOOK_URL = webhook;
-  const server = await createServer({ server: { host: '127.0.0.1', port: 0 } });
+async function assertFits(page, label, selector = '.survey-card') {
+  for (const viewport of viewports) {
+    await page.setViewportSize(viewport);
+    const layout = await page.evaluate((target) => {
+      const element = document.querySelector(target);
+      const rect = element.getBoundingClientRect();
+      return {
+        top: rect.top,
+        bottom: rect.bottom,
+        content: element.scrollHeight,
+        height: element.clientHeight,
+        scrollWidth: document.documentElement.scrollWidth,
+        scrollHeight: document.documentElement.scrollHeight,
+        innerWidth,
+        innerHeight,
+      };
+    }, selector);
+    const size = `${viewport.width}x${viewport.height} ${label}`;
+    assert.ok(layout.top >= -1, `${size}: top is visible (${layout.top})`);
+    assert.ok(layout.bottom <= layout.innerHeight + 1, `${size}: bottom is visible (${layout.bottom})`);
+    assert.ok(layout.content <= layout.height + 1, `${size}: content fits (${layout.content}/${layout.height})`);
+    assert.ok(layout.scrollWidth <= layout.innerWidth, `${size}: no horizontal overflow`);
+    assert.ok(layout.scrollHeight <= layout.innerHeight, `${size}: no vertical overflow`);
+  }
+}
+
+async function assertSplashFits(page) {
+  for (const viewport of viewports) {
+    await page.setViewportSize(viewport);
+    await page.reload();
+    await page.evaluate(() => document.fonts.ready);
+    assert.equal(await page.evaluate(() => document.fonts.check('32px Heavitas')), true, 'Heavitas webfont loads');
+    await page.locator('.splash-content').evaluate((panel) => {
+      for (const animation of panel.getAnimations({ subtree: true })) {
+        if (animation.effect?.getTiming().iterations === 1) animation.finish();
+      }
+    });
+    const layout = await page.locator('.splash-content').evaluate((panel) => {
+      const rect = panel.getBoundingClientRect();
+      const wordmark = panel.querySelector('.splash-wordmark');
+      const mark = panel.querySelector('.splash-mark');
+      const style = getComputedStyle(panel);
+      return {
+        top: rect.top, bottom: rect.bottom, content: panel.scrollHeight, height: panel.clientHeight, innerHeight,
+        wordmarkWidth: wordmark.clientWidth, wordmarkContent: wordmark.scrollWidth,
+        wordmarkFont: getComputedStyle(wordmark).fontFamily,
+        markRight: mark.getBoundingClientRect().right, wordmarkLeft: wordmark.getBoundingClientRect().left,
+        markWidth: mark.getBoundingClientRect().width, wordmarkHeight: wordmark.getBoundingClientRect().height,
+        subtextLeft: panel.querySelector('.splash-subtext').getBoundingClientRect().left,
+        borderWidth: style.borderTopWidth, boxShadow: style.boxShadow,
+      };
+    });
+    assert.ok(layout.top >= -1 && layout.bottom <= layout.innerHeight + 1, `${viewport.width}x${viewport.height} splash is visible`);
+    assert.ok(Math.abs((layout.top + layout.bottom) / 2 - layout.innerHeight / 2) <= 2, `${viewport.width}x${viewport.height} splash is centered (${layout.top}/${layout.bottom}/${layout.innerHeight})`);
+    assert.ok(layout.content <= layout.height + 4, `${viewport.width}x${viewport.height} splash content fits (${layout.content}/${layout.height})`);
+    assert.ok(layout.wordmarkContent <= layout.wordmarkWidth + 1, `${viewport.width}x${viewport.height} wordmark fits`);
+    assert.match(layout.wordmarkFont, /Heavitas/, `${viewport.width}x${viewport.height} splash uses Heavitas`);
+    assert.ok(layout.markRight <= layout.wordmarkLeft + 1, `${viewport.width}x${viewport.height} brand has no overlap`);
+    assert.ok(Math.abs(layout.subtextLeft - layout.wordmarkLeft) <= 1, `${viewport.width}x${viewport.height} subtitle aligns with wordmark`);
+    assert.equal(layout.borderWidth, '0px', `${viewport.width}x${viewport.height} splash has no card border`);
+    assert.equal(layout.boxShadow, 'none', `${viewport.width}x${viewport.height} splash has no card shadow`);
+    assert.ok(layout.markWidth >= (viewport.width >= 1000 ? 180 : 75), `${viewport.width}x${viewport.height} logo is prominent`);
+    assert.ok(layout.markWidth > layout.wordmarkHeight, `${viewport.width}x${viewport.height} logo is larger than the two-line wordmark`);
+    if (viewport.width === 1366 || viewport.width === 667 || (viewport.width === 390 && viewport.height === 844)) {
+      await page.screenshot({ path: join('test-artifacts', `survey-splash-full-${viewport.width}.png`) });
+    }
+  }
+}
+
+test('responsive survey uses custom dropdowns and modals while preserving saved answers', { skip: !existsSync(chromePath) }, async () => {
+  const payloads = [];
+  const secret = 'browser-test-secret-32-characters-long';
+  const n8n = createHttpServer(async (request, response) => {
+    assert.equal(request.method, 'POST');
+    assert.equal(request.url, '/webhook-test/mock-survey');
+    assert.equal(request.headers['x-opg-survey-key'], secret);
+    assert.match(request.headers['content-type'], /^application\/json/i);
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    payloads.push(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+    response.setHeader('Content-Type', 'application/json');
+    response.statusCode = payloads.length === 1 ? 500 : 200;
+    response.end(JSON.stringify(payloads.length === 1 ? { ok: false } : { ok: true, status: 'saved' }));
+  });
+  await new Promise((resolve) => n8n.listen(0, '127.0.0.1', resolve));
+  process.env.N8N_WEBHOOK_URL = `http://127.0.0.1:${n8n.address().port}/webhook-test/mock-survey`;
+  process.env.N8N_WEBHOOK_SECRET = secret;
+  const server = await createServer({ mode: 'test', server: { host: '127.0.0.1', port: 0 } });
   await server.listen();
   const browser = await chromium.launch({ executablePath: chromePath, headless: true });
   try {
-    const baseUrl = server.resolvedUrls.local[0];
-    const page = await browser.newPage({ viewport: { width: 320, height: 900 } });
-    let requests = 0;
-    let payload;
-    await page.route(webhook, async (route) => {
-      requests += 1;
-      assert.match(route.request().headers()['content-type'], /^text\/plain/i);
-      payload = JSON.parse(route.request().postData());
-      await route.fulfill({
-        status: requests === 1 ? 500 : 200,
-        contentType: 'application/json',
-        headers: { 'access-control-allow-origin': '*' },
-        body: JSON.stringify(requests === 1 ? { ok: false } : { ok: true, status: 'unsubscribed' }),
-      });
+    const page = await browser.newPage({ viewport: { width: 320, height: 568 } });
+    const browserRequests = [];
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname !== '/api/submit') return;
+      browserRequests.push({ url: request.url(), headers: request.headers(), body: JSON.parse(request.postData()) });
     });
 
-    await page.goto(`${baseUrl}?token=browser-test-token&campaign=oct-2026`);
-    assert.equal(requests, 0, 'GET must not unsubscribe');
-    assert.equal(await page.locator('#preference-form').isVisible(), true);
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'no horizontal overflow at 320px');
-    assert.equal(new URL(page.url()).searchParams.has('token'), false, 'token removed from address bar');
-
+    await page.goto(server.resolvedUrls.local[0]);
     mkdirSync('test-artifacts', { recursive: true });
-    await page.screenshot({ path: join('test-artifacts', 'mobile-320.png'), fullPage: true });
+    assert.equal(await page.locator('#splash-screen').isVisible(), true);
+    assert.equal(await page.locator('#skip-splash').count(), 0);
+    assert.equal(await page.locator('.splash-progress').count(), 0);
+    assert.deepEqual(await page.locator('.splash-wordmark span').allTextContents(), ['Outsourced', 'Pro Global']);
+    assert.equal(await page.locator('.splash-subtext').textContent(), "We're ready to hear what matters to you.");
+    await assertSplashFits(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload();
+    assert.equal(await page.locator('.splash-mark-light').evaluate((img) => img.naturalWidth > 0), true);
+    assert.equal(await page.locator('.splash-mark-gold').evaluate((img) => img.naturalWidth > 0), true);
+    const logoBounds = await page.locator('.splash-mark img').evaluateAll((images) => images.map((image) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      const context = canvas.getContext('2d');
+      context.drawImage(image, 0, 0);
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      let left = canvas.width, top = canvas.height, right = -1, bottom = -1;
+      for (let y = 0; y < canvas.height; y++) {
+        for (let x = 0; x < canvas.width; x++) {
+          if (pixels[(y * canvas.width + x) * 4 + 3] <= 8) continue;
+          left = Math.min(left, x); top = Math.min(top, y);
+          right = Math.max(right, x); bottom = Math.max(bottom, y);
+        }
+      }
+      return { width: canvas.width, height: canvas.height, left, top, right, bottom };
+    }));
+    assert.deepEqual(logoBounds[0], logoBounds[1], 'white and gold logo have identical visible bounds');
+    await page.waitForTimeout(600);
+    await page.screenshot({ path: join('test-artifacts', 'survey-splash-mobile-390.png') });
+    assert.equal(await page.locator('.splash-mark-gold').evaluate((img) => Number(getComputedStyle(img).opacity) < .1), true);
+    await page.waitForTimeout(1000);
+    await page.screenshot({ path: join('test-artifacts', 'survey-splash-reveal-mobile-390.png') });
+    await page.locator('.splash-content').evaluate((panel) => {
+      for (const animation of panel.getAnimations({ subtree: true })) {
+        if (animation.effect?.getTiming().iterations === 1) animation.finish();
+      }
+    });
+    await page.screenshot({ path: join('test-artifacts', 'survey-splash-final-mobile-390.png') });
+    assert.equal(await page.locator('.splash-mark-gold').evaluate((img) => Number(getComputedStyle(img).opacity) > .9), true);
+    assert.equal(await page.locator('.splash-mark-light').evaluate((img) => Number(getComputedStyle(img).opacity) < .1), true);
+    const wordmark = await page.locator('.splash-lockup').evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const panel = element.closest('.splash-content').getBoundingClientRect();
+      return { opacity: Number(getComputedStyle(element).opacity), filter: getComputedStyle(element).filter, right: rect.right, panelRight: panel.right };
+    });
+    assert.equal(wordmark.opacity > .9, true);
+    assert.match(wordmark.filter, /blur\(0px\)/);
+    assert.equal(wordmark.right <= wordmark.panelRight + 1, true);
+    await page.locator('#splash-screen').waitFor({ state: 'hidden' });
+    assert.equal(await page.locator('.survey-card').evaluate((card) => card.inert), false);
+    assert.match(await page.locator('#page-title').evaluate((title) => getComputedStyle(title).fontFamily), /Heavitas/);
+    assert.equal(await page.locator('.brand img').evaluate((img) => img.naturalWidth > 0), true);
+    assert.equal(await page.getByText(/unsubscribe/i).count(), 0);
+    assert.equal(await page.locator('#name').getAttribute('placeholder'), 'Enter your full name');
+    assert.equal(await page.locator('#email').getAttribute('placeholder'), 'you@example.com');
+    await page.setViewportSize({ width: 1366, height: 768 });
+    const heading = await page.locator('#page-title').evaluate((title) => ({
+      height: title.getBoundingClientRect().height,
+      lineHeight: parseFloat(getComputedStyle(title).lineHeight),
+      scrollWidth: title.scrollWidth,
+      clientWidth: title.clientWidth,
+    }));
+    assert.ok(heading.height <= heading.lineHeight + 1, 'desktop heading stays on one line');
+    assert.ok(heading.scrollWidth <= heading.clientWidth, 'desktop heading fits within the card');
+    await assertFits(page, 'details');
+    await page.setViewportSize({ width: 390, height: 844 });
+    const fieldType = await page.evaluate(() => ({
+      label: parseFloat(getComputedStyle(document.querySelector('label[for="name"]')).fontSize),
+      input: parseFloat(getComputedStyle(document.querySelector('#name')).fontSize),
+    }));
+    assert.ok(fieldType.label >= 15, 'form labels are readable on mobile');
+    assert.ok(fieldType.input >= 16, 'input text is readable on mobile');
+    await page.screenshot({ path: join('test-artifacts', 'survey-mobile-390.png') });
 
-    await page.keyboard.press('Tab');
-    assert.equal(await page.evaluate(() => document.activeElement?.id), 'reason');
-    await page.locator('#reason').selectOption({ label: 'Other' });
-    assert.equal(await page.locator('#other-reason-field').isVisible(), true);
-    await page.locator('#other-reason').fill('Useful feedback');
-    await page.locator('#reason').selectOption('');
-    assert.equal(await page.locator('#other-reason-field').isVisible(), false);
-    assert.equal(await page.locator('#other-reason').inputValue(), '');
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await page.locator('#feedback-modal').waitFor({ state: 'visible' });
+    assert.match(await page.locator('#modal-title').evaluate((title) => getComputedStyle(title).fontFamily), /Heavitas/);
+    assert.match(await page.locator('#modal-title').textContent(), /Enter your name/);
+    assert.equal(await page.locator('.survey-card').evaluate((card) => card.inert), true);
+    await assertFits(page, 'validation modal', '.modal-panel');
+    await page.getByRole('button', { name: 'OK' }).click();
+    assert.equal(await page.locator('#feedback-modal').isVisible(), false);
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'name');
 
-    await page.getByRole('button', { name: 'Unsubscribe' }).click();
-    await page.getByRole('alert').waitFor();
-    assert.equal(requests, 1);
-    assert.equal(payload.reason, '');
-    assert.equal(payload.futureContact, '');
-    assert.equal(Object.hasOwn(payload, 'email'), false);
-    assert.match(await page.getByRole('alert').textContent(), /try again/i);
-    assert.equal(await page.getByRole('button', { name: 'Unsubscribe' }).isEnabled(), true);
+    await page.locator('#name').fill('   ');
+    await page.locator('#email').fill('person@example.com');
+    await page.getByRole('button', { name: 'Continue' }).click();
+    assert.match(await page.locator('#modal-title').textContent(), /Enter your name/);
+    await page.getByRole('button', { name: 'OK' }).click();
+    await page.locator('#name').fill('Example Person');
+    await page.locator('#email').fill('person@example');
+    await page.getByRole('button', { name: 'Continue' }).click();
+    assert.match(await page.locator('#modal-title').textContent(), /Check your email/);
+    await page.getByRole('button', { name: 'OK' }).click();
+    await page.locator('#email').fill('person@example.com');
+    await page.getByRole('button', { name: 'Continue' }).click();
+    assert.match(await page.locator('#step-caption').textContent(), /Step 2 of 3/);
+    await assertFits(page, 'reason');
 
-    await page.getByRole('button', { name: 'Unsubscribe' }).click();
-    await page.getByText('You’re all set').waitFor();
-    assert.equal(requests, 2);
-    assert.equal(await page.locator('#preference-form').isVisible(), false);
+    await page.getByRole('button', { name: 'Continue' }).click();
+    assert.match(await page.locator('#modal-title').textContent(), /Choose an answer/);
+    await page.getByRole('button', { name: 'OK' }).click();
+    for (const viewport of viewports) {
+      await page.setViewportSize(viewport);
+      await page.locator('#question1-trigger').click();
+      const menu = await page.locator('#question1-list').evaluate((list) => {
+        const rect = list.getBoundingClientRect();
+        return { top: rect.top, bottom: rect.bottom, innerHeight };
+      });
+      assert.ok(menu.top >= -1 && menu.bottom <= menu.innerHeight + 1, `${viewport.width}x${viewport.height}: dropdown fits the screen`);
+      await page.locator('#question1-trigger').click();
+    }
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await page.locator('#question1-trigger').click();
+    assert.equal(await page.locator('#question1-list').isVisible(), true);
+    const listRadius = await page.locator('#question1-list').evaluate((list) => getComputedStyle(list).borderRadius);
+    assert.notEqual(listRadius, '0px');
+    const chosenReason = page.getByRole('option', { name: 'We currently handle this in-house.' });
+    await chosenReason.hover();
+    assert.match(await chosenReason.evaluate((option) => getComputedStyle(option).backgroundImage), /linear-gradient/);
+    await page.screenshot({ path: join('test-artifacts', 'survey-dropdown-desktop-1366.png') });
+    await chosenReason.click();
+    assert.equal(await page.locator('#question1').inputValue(), 'We currently handle this in-house.');
+    assert.match(await page.locator('#question1-display').textContent(), /in-house/);
+    await page.getByRole('button', { name: 'Continue' }).click();
+    assert.match(await page.locator('#step-caption').textContent(), /Step 3 of 3/);
+    await assertFits(page, 'future interest');
+    await page.getByRole('button', { name: 'Back' }).click();
+    assert.equal(await page.locator('#question1').inputValue(), 'We currently handle this in-house.');
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await page.locator('#question2-trigger').focus();
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('End');
+    await page.keyboard.press('Enter');
+    assert.equal(await page.locator('#question2').inputValue(), 'Unsure');
 
-    const missingLink = await browser.newPage();
-    await missingLink.goto(baseUrl);
-    assert.equal(await missingLink.getByText('We can’t use this link').isVisible(), true);
-    assert.equal(await missingLink.locator('#preference-form').isVisible(), false);
-    await missingLink.close();
+    await page.setViewportSize({ width: 320, height: 480 });
+    await page.screenshot({ path: join('test-artifacts', 'survey-mobile-short-320.png') });
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await page.screenshot({ path: join('test-artifacts', 'survey-desktop-1366.png') });
+    assert.match(await page.locator('#submit-button').evaluate((button) => getComputedStyle(button).backgroundImage), /linear-gradient/);
+    assert.match(await page.locator('.back-button').last().evaluate((button) => getComputedStyle(button).backgroundImage), /linear-gradient/);
+    assert.equal(await page.locator('button').evaluateAll((buttons) => buttons.some((button) => button.textContent.includes('→'))), false);
 
-    const invalidLink = await browser.newPage();
-    await invalidLink.route(webhook, async (route) => route.fulfill({ status: 401, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: '{"ok":false}' }));
-    await invalidLink.goto(`${baseUrl}?token=invalid-token`);
-    await invalidLink.getByRole('button', { name: 'Unsubscribe' }).click();
-    await invalidLink.getByText('We can’t use this link').waitFor();
-    await invalidLink.close();
+    await page.getByRole('button', { name: 'Submit response' }).click();
+    await page.locator('#feedback-modal').waitFor({ state: 'visible' });
+    assert.match(await page.locator('#modal-title').textContent(), /could not save/);
+    assert.equal(payloads.length, 1);
+    assert.equal(browserRequests.length, 1);
+    assert.equal(new URL(browserRequests[0].url).origin, new URL(server.resolvedUrls.local[0]).origin);
+    assert.match(browserRequests[0].headers['content-type'], /^application\/json/i);
+    assert.equal(Object.hasOwn(browserRequests[0].headers, 'x-opg-survey-key'), false);
+    assert.equal(Object.hasOwn(browserRequests[0].body, 'requestId'), true);
+    assert.equal(Object.hasOwn(browserRequests[0].body, 'responseId'), false);
+    assert.equal(payloads[0].name, 'Example Person');
+    assert.equal(payloads[0].email, 'person@example.com');
+    assert.equal(payloads[0].question2, 'Unsure');
+    assert.equal(Object.hasOwn(payloads[0], 'token'), false);
+    await page.getByRole('button', { name: 'Try again' }).click();
+    assert.equal(await page.getByRole('button', { name: 'Submit response' }).isEnabled(), true);
+
+    await page.getByRole('button', { name: 'Submit response' }).click();
+    await page.locator('#feedback-modal').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('.modal-panel').getAttribute('data-state'), 'success');
+    assert.match(await page.locator('#modal-message').textContent(), /response has been saved successfully/);
+    assert.equal(await page.locator('.modal-success-icon').isVisible(), true);
+    assert.equal(payloads.length, 2);
+    assert.equal(payloads[0].responseId, payloads[1].responseId, 'retry must update one row');
+    assert.equal(await page.locator('#survey-form').isVisible(), true, 'answers remain behind the modal');
+    await assertFits(page, 'success modal', '.modal-panel');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: join('test-artifacts', 'survey-success-modal-mobile-390.png') });
+    await page.getByRole('button', { name: 'Start again' }).click();
+    assert.equal(await page.locator('#feedback-modal').isVisible(), false);
+    assert.equal(await page.locator('#survey-form').isVisible(), true);
+    assert.match(await page.locator('#step-caption').textContent(), /Step 1 of 3/);
+    assert.equal(await page.locator('#name').inputValue(), '');
+    assert.equal(await page.locator('#email').inputValue(), '');
+    assert.equal(await page.locator('#question1').inputValue(), '');
+    assert.equal(await page.locator('#question2').inputValue(), '');
+    assert.equal(await page.locator('#question1-display').textContent(), 'Select an answer');
+    assert.equal(await page.locator('#question2-trigger').isEnabled(), true);
+    assert.equal(await page.locator('#name').getAttribute('readonly'), null);
+    assert.equal(await page.locator('#survey-form').getAttribute('data-submitted'), null);
+    assert.equal(payloads.length, 2);
+
+    await page.locator('#name').fill('Another Person');
+    await page.locator('#email').fill('another@example.com');
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await page.locator('#question1-trigger').click();
+    await page.getByRole('option', { name: 'Not a priority at this time.' }).click();
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await page.locator('#question2-trigger').click();
+    await page.getByRole('option', { name: 'Yes' }).click();
+    await page.getByRole('button', { name: 'Submit response' }).click();
+    await page.locator('#feedback-modal').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('.modal-panel').getAttribute('data-state'), 'success');
+    assert.equal(payloads.length, 3);
+    assert.notEqual(payloads[2].responseId, payloads[1].responseId, 'a new survey needs a new response ID');
+    assert.equal(payloads[2].email, 'another@example.com');
+
+    const reducedMotionPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+    await reducedMotionPage.goto(server.resolvedUrls.local[0]);
+    await reducedMotionPage.locator('#splash-screen').waitFor({ state: 'hidden' });
+    assert.equal(await reducedMotionPage.locator('.survey-card').evaluate((element) => element.inert), false);
+    assert.ok(await reducedMotionPage.locator('[data-form-step="0"]').evaluate((panel) => parseFloat(getComputedStyle(panel).animationDuration) < .01));
+    await reducedMotionPage.close();
   } finally {
     await browser.close();
     await server.close();
+    await new Promise((resolve) => n8n.close(resolve));
+    delete process.env.N8N_WEBHOOK_URL;
+    delete process.env.N8N_WEBHOOK_SECRET;
   }
 });

@@ -1,90 +1,43 @@
-# OPG newsletter preferences
+# OPG services survey
 
-A small Vite website for unsubscribing from the OPG newsletter. The browser sends only an opaque recipient token and optional feedback. The n8n workflows resolve the email address from a restricted Google Sheet.
+This is a public, three-step survey for a name, email address, and two fixed-choice answers. It records responses in Google Sheets through n8n. It does not unsubscribe anyone or stop Gmail outreach automatically. The confirmation only says the response was recorded.
 
-## Run locally
-
-Requirements: Node.js 20.19+ or 22.12+ and npm.
-
-```powershell
-npm install
-Copy-Item .env.example .env.local
-npm run dev
-```
-
-Set `VITE_N8N_WEBHOOK_URL` in `.env.local` to the test or production URL from the n8n **Form Webhook** node. It is a public endpoint, not a secret. The page expects a link like:
+## Architecture
 
 ```text
-http://localhost:5173/?token=OPAQUE_TOKEN&campaign=CAMPAIGN_ID
+Browser → same-origin POST /api/submit → Vercel function → authenticated n8n production webhook → Google Sheets Responses tab
 ```
 
-The page removes the token from the visible address bar after loading it. Opening the page never unsubscribes the recipient. Only a POST from the Unsubscribe button does that.
+The browser receives only a generic success or error. The n8n URL and authentication secret belong in server-only environment variables. The frontend must never use a `VITE_` variable for either one. The function checks the request, limits its size, and gives retries of the same answer a stable `response_id`. The n8n workflow checks the payload again before writing the Sheet row.
 
-```powershell
-npm test
-npm run test:browser
-npm run build
-```
+## Local development and tests
 
-`test:browser` uses an installed Chrome at `C:\Program Files\Google\Chrome\Application\chrome.exe`; set `CHROME_PATH` if it is elsewhere. The built static site is in `dist/`. The browser test mocks the webhook and does not contact n8n.
+1. Use Node.js 22 and run `npm ci`.
+2. Copy `.env.example` to `.env.local` and set `N8N_WEBHOOK_URL` to an HTTPS n8n **Test URL** (`/webhook-test/`) or a published **Production URL** (`/webhook/`). Set `N8N_WEBHOOK_SECRET` to the same random value as the n8n Header Auth credential (at least 32 characters). Do not add a `VITE_` prefix. Keep `.env.local` private. Vercel production accepts only the published `/webhook/` URL.
+3. For a Test URL, click **Execute workflow** in n8n so the entire workflow listens, then submit the form while that listener is active. A test listener can be used for one call and may expire; start it again for another submission. Run `npm run dev` and visit `http://localhost:5173`. Vite provides a local `/api/submit` adapter for development; Vite itself is not the production host. Restart Vite after changing `.env.local`.
+4. Run `npm test` and `npm run test:browser`. The browser test uses a local mocked n8n endpoint and does not add a real Sheet row.
 
-## Google Sheets setup
+The Vite preview server is for local preview only. Deploy the built `dist` site with the `api/submit.js` Vercel function.
 
-Create a restricted spreadsheet named `OPG Newsletter Preferences` with these two tabs. Put each header in row 1 and use the names exactly as shown.
+## Required production setup
 
-`Recipients`:
+These account changes cannot be made by importing this repository alone:
 
-```text
-recipient_id,email,token,campaign_id,status,token_created_at,token_expires_at,unsubscribed_at,updated_at
-```
+1. **Replace the exposed webhook.** Disable or delete the old public workflow and its `/webhook-test/` endpoint. Import the new `automation/survey-responses.workflow.json` template, which uses `opg-services-survey-secure-v2`. Remove the old URL from any existing site deployment by redeploying. Treat historical copies of the old URL as exposed.
+2. **Configure n8n.** Create a Header Auth credential with header name `X-OPG-Survey-Key` and a new random value of at least 32 characters. Attach it to **Survey Webhook**. Set the **Save Response** Google Sheets credential and spreadsheet ID. Ensure the `Responses` tab has these exact columns: `response_id,email,name,question1,question2,submitted_at`. Run the **whole workflow** with the Test URL before deployment, then publish it and copy its **Production URL** (`/webhook/`, never `/webhook-test/`) for Vercel. The workflow template does not include credentials.
+3. **Configure Vercel.** Import this repository as a Vite project with build command `npm run build` and output directory `dist`. Keep `api/submit.js` in the deployed project. Set `N8N_WEBHOOK_URL` to the new n8n Production URL and `N8N_WEBHOOK_SECRET` to the Header Auth value in Vercel's server environment settings. Do not create `VITE_N8N_WEBHOOK_URL`. Deploy over HTTPS. Set separate server environment values for Preview if Preview submissions are needed.
+4. **Configure abuse controls in Vercel Firewall.** In **Firewall → Configure → New Rule**, match path `/api/submit` and method `POST`; choose **Rate Limit**, a **Fixed Window** of 10 requests per 10 minutes per IP, and a 429 response. Publish the rule. Review the Firewall counts and the function's fixed-category outcomes (`saved`, `invalid_input`, `honeypot`, `upstream_failure`, etc.) and tune the limit for legitimate traffic. Do not add contact details, request bodies, or secrets to logs. A honeypot alone does not stop automated submissions.
+5. **Restrict data access.** Allow only staff who need it to view the n8n workflow, credentials, and Google Sheet. The template disables saved success, error, and manual n8n executions; confirm those settings after import and check any instance-wide overrides or separate error workflow. Never send full submission data to a Slack alert.
+6. **Verify before sharing.** Submit a test response on the deployed HTTPS site. Confirm the browser calls only `/api/submit`, receives success after the Sheet row appears, and has no n8n URL or secret in its network requests or built files. Check the deployed CSP and security headers. Delete the test row manually. The mocked browser test also covers a failed upstream response followed by a retry with the same `response_id`.
 
-`Responses`:
+The `Responses` Sheet rows are retained **until staff manually delete them**, as requested. There is no automatic row deletion. Review access and old rows periodically. Consider Sheets backups and exports as part of the same manual retention policy.
 
-```text
-response_key,response_id,recipient_id,email,campaign_id,reason,other_reason,future_contact,unsubscribe_status,unsubscribed_at,feedback_submitted_at,source
-```
+## Limits and operational notes
 
-`response_key` is the stable recipient and campaign lookup key used to update one response row on a retry. Store timestamps as UTC ISO 8601 strings, for example `2026-10-13T05:30:00.000Z`. Format `token`, `recipient_id`, and `response_key` as plain text. Limit sheet access to the OPG operators who need it.
+- Names and email addresses are self-reported. The form has no email ownership verification.
+- The stable `response_id` and Sheets **Append or Update Row** reduce duplicate rows on sequential retries. Concurrent requests can still race because Google Sheets is not a transactional uniqueness store.
+- Vercel's IP rate limiting is a proportionate first layer for an anonymous form, not a guarantee against distributed abuse. The function does not retain IP addresses.
+- The server returns generic errors; check n8n and Vercel operational logs for a failed write. Keep those logs free of personal data.
+- The bundled Heavitas font may need a separate website-use license from its author before public deployment; confirm the license for your use.
 
-Generate a fresh 256-bit token for each recipient and campaign with `npm run token:new`. Store it only in the `Recipients` sheet and the corresponding personalized newsletter link. Do not put real recipient data or tokens in this repository. When the email platform has its own secure unsubscribe token, its integration may replace this token generation step after the n8n lookup is adapted.
-
-For this MVP, keep one `Recipients` row per person and keep `status` unsubscribed across later campaigns. If OPG instead creates one row per campaign, its send process must check recipient-level suppression across all rows; a newer `subscribed` row must never override an earlier unsubscribe.
-
-## n8n setup
-
-The files in `automation/` are importable workflow templates. Run `npm run workflows:build` after changing their source.
-
-1. Import `automation/newsletter-preferences.workflow.json`, `automation/one-click-unsubscribe.workflow.json`, and `automation/error-alert.workflow.json` into n8n. They start inactive.
-2. In every Google Sheets node, replace `REPLACE_WITH_SPREADSHEET_ID` with the new spreadsheet ID and select an OPG Google Sheets credential. Confirm each node points to its named tab and that the column mappings load correctly.
-3. In **Form Webhook**, set **Allowed Origins (CORS)** to the actual HTTPS form origin. The template uses `https://preferences.opg.com`; change it if the deployed domain differs.
-4. In the error workflow, set the internal recipient, a verified sender address, and SMTP credentials in **Email Internal Owner**. Its content deliberately omits tokens, email addresses, and form answers. Set both unsubscribe workflows’ **Error workflow** setting to this workflow.
-5. Test a recipient row through the n8n test webhook. Check blank feedback, every dropdown value, an invalid or expired token, repeated submissions, and a Sheets failure. Then publish the workflows and switch `.env.local` to the production form webhook URL.
-
-The browser sends a JSON string with `Content-Type: text/plain;charset=UTF-8`. This is intentional: it avoids a cross-origin `OPTIONS` preflight. The **Validate Request** Code node parses the string as JSON and validates the same fields described in `IMPLEMENTATION_PLAN.md`. If OPG places a same-origin proxy in front of n8n later, the transport can switch to `application/json` while keeping the JSON payload unchanged. n8n still needs the form origin in its CORS setting so the browser can read the response.
-
-The form workflow checks the token, optional expiry, and campaign before it updates `Recipients` and upserts `Responses`. A repeat request preserves the original unsubscribe timestamp and response ID. Google Sheets has no transaction across the two tabs; if the response write fails after the status update, the user can retry and the same response key is used. Concurrent requests for the same token should also be limited at the hosting or proxy layer because Sheets upsert is not atomic.
-
-## Newsletter sending and one-click header
-
-The email platform must suppress recipients whose `Recipients.status` is `unsubscribed` before any later campaign. Connect its suppression or unsubscribe mechanism to this status (or make the sheet its authoritative send list). Without this integration, updating Google Sheets alone cannot guarantee that newsletter emails stop. The exact connection depends on OPG’s newsletter provider.
-
-Configure the newsletter platform’s one-click headers to POST to the separate workflow. For example, replace the domain and personalization fields below with OPG’s real values:
-
-```text
-List-Unsubscribe: <https://automation.opg.example/webhook/opg-one-click-unsubscribe?token={{recipient_token}}&campaign={{campaign_id}}>
-List-Unsubscribe-Post: List-Unsubscribe=One-Click
-```
-
-The one-click workflow requires an intentional POST containing `List-Unsubscribe=One-Click`; a normal GET does nothing. It updates the recipient status without asking for feedback. Keep the visible newsletter link pointed to the branded page.
-
-## Deployment checklist
-
-- Set the production n8n webhook URL at build time and deploy `dist/` to HTTPS static hosting.
-- Use the deployed form origin in n8n CORS. Set rate limits at the hosting or reverse-proxy layer when available.
-- Verify the Google credential, spreadsheet access, email alert credential, and n8n error workflow.
-- Confirm the email platform actually suppresses unsubscribed recipients and sends the one-click headers.
-- Run a small internal email test through both the branded page and the one-click POST before a public send.
-- Define feedback retention and keep n8n execution data retention short.
-- Restrict access to n8n error executions and prune them promptly; they can contain recipient data needed for troubleshooting.
-
-No production accounts, recipient list, email platform, domain, or n8n URL are configured in this repository.
+To regenerate the n8n import file after changing workflow logic, run `npm run workflows:build` and re-import/review it in n8n.

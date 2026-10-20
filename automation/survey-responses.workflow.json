@@ -1,0 +1,277 @@
+{
+  "name": "OPG — Services Survey",
+  "nodes": [
+    {
+      "id": "fc1100de-d648-4d0e-acff-1c1d5c6026e1",
+      "name": "Survey Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "opg-services-survey-secure-v2",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "7446987c-ca96-45bd-af7d-dcc406650b0f"
+    },
+    {
+      "id": "a1f64bb7-6885-4512-ab7f-6e1cbbeaa70c",
+      "name": "Validate Survey",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const validate = function validateSurveyRequest(rawBody) {\n  const invalid = { valid: false };\n  let body = rawBody;\n  if (typeof body === 'string') {\n    try { body = JSON.parse(body); } catch { return invalid; }\n  }\n  if (!body || typeof body !== 'object' || Array.isArray(body)) return invalid;\n\n  const keys = ['responseId', 'name', 'email', 'question1', 'question2', 'website'];\n  if (Object.keys(body).length !== keys.length) return invalid;\n  if (keys.some((key) => !Object.hasOwn(body, key) || typeof body[key] !== 'string')) return invalid;\n\n  const responseId = body.responseId.trim();\n  const name = body.name.trim();\n  const email = body.email.trim();\n  const question1 = body.question1;\n  const question2 = body.question2;\n  const reasons = [\n    'We already use a similar service/competitor.',\n    'We currently handle this in-house.',\n    'Budget constraints / Too expensive.',\n    'Not a priority at this time.',\n    \"The service doesn't fit our current business needs.\",\n  ];\n\n  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(responseId)) return invalid;\n  if (!name || name.length > 120 || /[\\u0000-\\u001f\\u007f-\\u009f\\u202a-\\u202e\\u2066-\\u2069<>]/u.test(name)) return invalid;\n  if (email.length > 254 || email.includes('..')) return invalid;\n  const parts = email.split('@');\n  if (parts.length !== 2) return invalid;\n  const [local, domain] = parts;\n  if (!local || local.length > 64 || local.startsWith('.') || local.endsWith('.')\n    || !/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+$/i.test(local)) return invalid;\n  const labels = domain.split('.');\n  if (labels.length < 2 || labels.some((label) => !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label))) return invalid;\n  if (!reasons.includes(question1) || !['Yes', 'No', 'Unsure'].includes(question2)) return invalid;\n  if (body.website.trim()) return invalid;\n\n  return { valid: true, responseId, name, email, question1, question2 };\n};\nreturn [{ json: validate($input.first().json.body) }];"
+      }
+    },
+    {
+      "id": "7df0fc75-1d16-435a-a88e-ebe53b267506",
+      "name": "Request Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.valid }}",
+              "value2": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "7c41b898-c5da-4cfa-aaa0-49b65ef50248",
+      "name": "Bad Request",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        660,
+        160
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": {
+          "ok": false,
+          "message": "Invalid survey response."
+        },
+        "options": {
+          "responseCode": 400
+        }
+      }
+    },
+    {
+      "id": "b8504711-4138-4506-a102-92762e2a926d",
+      "name": "Prepare Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        -100
+      ],
+      "parameters": {
+        "jsCode": "const prepare = function prepareResponse(request, now = new Date()) {\n  if (!request?.valid) throw new Error('Survey request was not validated');\n  // Prevent names or email addresses beginning with formula characters from\n  // being interpreted as formulas by Google Sheets.\n  const asText = (value) => /^[=+\\-@]/u.test(value) ? `'${value}` : value;\n  return {\n    response_id: request.responseId,\n    email: asText(request.email),\n    name: asText(request.name),\n    question1: request.question1,\n    question2: request.question2,\n    submitted_at: now.toISOString(),\n  };\n};\nreturn [{ json: prepare($input.first().json) }];"
+      }
+    },
+    {
+      "id": "2af2f389-b88e-4d3c-a464-19dce82413f3",
+      "name": "Save Response",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        880,
+        -100
+      ],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Responses",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "response_id": "={{ $('Prepare Response').first().json.response_id }}",
+            "email": "={{ $('Prepare Response').first().json.email }}",
+            "name": "={{ $('Prepare Response').first().json.name }}",
+            "question1": "={{ $('Prepare Response').first().json.question1 }}",
+            "question2": "={{ $('Prepare Response').first().json.question2 }}",
+            "submitted_at": "={{ $('Prepare Response').first().json.submitted_at }}"
+          },
+          "matchingColumns": [
+            "response_id"
+          ],
+          "schema": [
+            {
+              "id": "response_id",
+              "displayName": "response_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "question1",
+              "displayName": "question1",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "question2",
+              "displayName": "question2",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "submitted_at",
+              "displayName": "submitted_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "f2957110-7c55-4ae4-a2be-86f8ad5d9b6f",
+      "name": "Survey Saved",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1100,
+        -100
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": {
+          "ok": true,
+          "status": "saved"
+        },
+        "options": {
+          "responseCode": 200
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Survey Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Survey",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Survey": {
+      "main": [
+        [
+          {
+            "node": "Request Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Request Valid?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Bad Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Response": {
+      "main": [
+        [
+          {
+            "node": "Save Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Response": {
+      "main": [
+        [
+          {
+            "node": "Survey Saved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "active": false
+}

@@ -5,93 +5,140 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="referrer" content="no-referrer" />
     <meta name="theme-color" content="#0b0b0b" />
-    <meta name="description" content="Update your OPG newsletter preferences." />
-    <title>Unsubscribe | OPG Newsletter</title>
+    <meta name="description" content="Share your feedback with OPG." />
+    <title>OPG Services Survey</title>
+    <link rel="preload" as="image" href="/assets/opg-splash-light.png" />
+    <link rel="preload" as="image" href="/assets/opg-splash-gold.png" />
+    <link rel="preload" as="font" type="font/ttf" href="/assets/fonts/Heavitas.ttf" crossorigin />
+    <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
     <main class="page-shell">
-      <div class="ambient ambient-one" aria-hidden="true"></div>
-      <div class="ambient ambient-two" aria-hidden="true"></div>
+      <div id="splash-screen" class="splash-screen" role="status" aria-live="polite">
+        <div class="splash-content">
+          <div class="splash-brand">
+            <span class="splash-mark">
+              <img class="splash-mark-light" src="/assets/opg-splash-light.png" width="256" height="256" alt="" />
+              <img class="splash-mark-gold" src="/assets/opg-splash-gold.png" width="256" height="256" alt="" />
+            </span>
+            <span class="splash-lockup">
+              <span class="splash-wordmark"><span>Outsourced</span><span>Pro Global</span></span>
+              <span class="splash-subtext">We're ready to hear what matters to you.</span>
+            </span>
+          </div>
+        </div>
+      </div>
 
-      <section class="preference-card" aria-labelledby="page-title">
+      <section class="survey-card" data-step="0" aria-labelledby="page-title" inert>
         <header class="card-header">
           <div class="brand">
-            <img class="brand-mark" src="/assets/opg-logo.png" width="54" height="54" alt="" />
-            <span class="brand-name">OPG</span>
+            <img src="/assets/opg-full-logo.png" width="128" height="52" alt="Outsourced Pro Global" />
           </div>
-          <span class="eyebrow">NEWSLETTER PREFERENCES</span>
-          <h1 id="page-title">Say goodbye to the newsletter</h1>
-          <p class="intro">You can unsubscribe in one step. If you have a moment, your feedback will help us make future outreach more useful.</p>
+          <div class="header-copy">
+            <span class="eyebrow">OPG SERVICES SURVEY</span>
+            <h1 id="page-title" tabindex="-1">We’d like to hear from you</h1>
+            <p class="intro">Tell us what you think about OPG’s HR and Talent Acquisition services. Your answers help us understand what matters to you.</p>
+          </div>
         </header>
 
-        <div id="initializing" class="state-panel" role="status" aria-live="polite">
-          <span class="spinner" aria-hidden="true"></span>
-          <p>Checking your link…</p>
-        </div>
-
-        <div id="invalid-state" class="state-panel" role="alert" hidden>
-          <span class="state-icon" aria-hidden="true">!</span>
-          <h2>We can’t use this link</h2>
-          <p>This unsubscribe link is invalid or has expired. Please contact OPG for assistance.</p>
-        </div>
-
-        <div id="success-state" class="state-panel success-panel" aria-live="polite" hidden>
-          <span class="state-icon success-icon" aria-hidden="true">✓</span>
-          <h2>You’re all set</h2>
-          <p>You will no longer receive OPG newsletter emails. Thank you for helping us improve our outreach.</p>
-        </div>
-
-        <form id="preference-form" novalidate hidden>
-          <div class="form-heading">
-            <h2>Your feedback <span>(optional)</span></h2>
-            <p>Skip these questions if you’d prefer to unsubscribe now.</p>
+        <form id="survey-form" novalidate>
+          <div class="progress-area">
+            <p id="step-caption" tabindex="-1" aria-live="polite">Step 1 of 3 · Your details</p>
+            <div class="progress-track" aria-hidden="true"><span class="active"></span><span></span><span></span></div>
           </div>
 
-          <div class="field">
-            <label for="reason">What made you unsubscribe today?</label>
-            <select id="reason" name="reason">
-              <option value="">Select a reason (optional)</option>
-              <option>Not looking for opportunities or talent right now</option>
-              <option>The content is not relevant to me</option>
-              <option>I receive emails too often</option>
-              <option>I have already found a role or filled my hiring need</option>
-              <option>I prefer another communication channel</option>
-              <option>I do not remember subscribing</option>
-              <option>Other</option>
-            </select>
+          <div class="form-step" data-form-step="0">
+            <div class="identity-fields">
+              <div class="field">
+                <label for="name">Name</label>
+                <input id="name" name="name" type="text" autocomplete="name" placeholder="Enter your full name" maxlength="120" required />
+              </div>
+              <div class="field">
+                <label for="email">Email</label>
+                <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" maxlength="254" required />
+              </div>
+            </div>
+            <div class="form-actions">
+              <button class="next-button" type="button" data-next>Continue</button>
+            </div>
           </div>
 
-          <div id="other-reason-field" class="field conditional-field" hidden>
-            <label for="other-reason">Please tell us a little more <span class="optional">(optional)</span></label>
-            <textarea id="other-reason" name="otherReason" maxlength="500" rows="3" placeholder="Share anything you'd like us to know"></textarea>
-            <p class="field-hint">Up to 500 characters.</p>
+          <div class="form-step" data-form-step="1" hidden>
+            <div class="field question-field">
+              <label id="question1-label" for="question1-trigger"><span class="question-number" aria-hidden="true">01</span><span>What is the primary reason you are not currently interested in our services?</span></label>
+              <select id="question1" name="question1" hidden required>
+                <option value="">Select an answer</option>
+                <option>We already use a similar service/competitor.</option>
+                <option>We currently handle this in-house.</option>
+                <option>Budget constraints / Too expensive.</option>
+                <option>Not a priority at this time.</option>
+                <option>The service doesn't fit our current business needs.</option>
+              </select>
+              <div class="dropdown" data-dropdown="question1">
+                <button id="question1-trigger" class="dropdown-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="question1-list" aria-labelledby="question1-label question1-display">
+                  <span id="question1-display">Select an answer</span><span class="dropdown-chevron" aria-hidden="true"></span>
+                </button>
+                <ul id="question1-list" class="dropdown-list" role="listbox" aria-labelledby="question1-label" hidden></ul>
+              </div>
+            </div>
+            <div class="form-actions split-actions">
+              <button class="back-button" type="button" data-back>Back</button>
+              <button class="next-button" type="button" data-next>Continue</button>
+            </div>
           </div>
 
-          <div class="field">
-            <label for="future-contact">If the hiring landscape changes, may OPG contact you again?</label>
-            <select id="future-contact" name="futureContact" aria-describedby="future-contact-hint">
-              <option value="">Select an answer (optional)</option>
-              <option>Yes</option>
-              <option>No</option>
-            </select>
-            <p id="future-contact-hint" class="field-hint">Choosing “Yes” records your future contact preference. It does not resubscribe you to the newsletter today.</p>
+          <div class="form-step" data-form-step="2" hidden>
+            <div class="field question-field">
+              <label id="question2-label" for="question2-trigger"><span class="question-number" aria-hidden="true">02</span><span>If the hiring landscape changes in the future, are you willing to avail Outsourced Pro Global's HR and Talent Acquisition services?</span></label>
+              <select id="question2" name="question2" hidden required>
+                <option value="">Select an answer</option>
+                <option>Yes</option>
+                <option>No</option>
+                <option>Unsure</option>
+              </select>
+              <div class="dropdown" data-dropdown="question2">
+                <button id="question2-trigger" class="dropdown-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="question2-list" aria-labelledby="question2-label question2-display">
+                  <span id="question2-display">Select an answer</span><span class="dropdown-chevron" aria-hidden="true"></span>
+                </button>
+                <ul id="question2-list" class="dropdown-list" role="listbox" aria-labelledby="question2-label" hidden></ul>
+              </div>
+            </div>
+            <div class="honeypot" aria-hidden="true">
+              <label for="website">Website</label>
+              <input id="website" name="website" type="text" tabindex="-1" autocomplete="off" />
+            </div>
+            <div class="form-actions split-actions">
+              <button class="back-button" type="button" data-back>Back</button>
+              <button id="submit-button" class="submit-button" type="submit">
+                <span class="button-label">Submit response</span>
+              </button>
+            </div>
+            <p class="submit-note">We’ll use your information to record this survey response.</p>
           </div>
-
-          <div class="honeypot" aria-hidden="true">
-            <label for="website">Website</label>
-            <input id="website" name="website" type="text" tabindex="-1" autocomplete="off" />
-          </div>
-
-          <p id="form-error" class="form-error" role="alert" hidden></p>
-
-          <button id="submit-button" class="primary-button" type="submit" disabled>
-            <span class="button-label">Unsubscribe</span>
-            <span class="button-arrow" aria-hidden="true">→</span>
-          </button>
-          <p class="submit-note">Your newsletter subscription will end even if you leave the feedback blank.</p>
         </form>
       </section>
-      <p class="footer-note">OPG · Newsletter preferences</p>
+
+      <div id="feedback-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-describedby="modal-message" hidden>
+        <div class="modal-panel" data-state="notice">
+          <div class="modal-icon-wrap" aria-hidden="true">
+            <span class="confetti confetti-one"></span><span class="confetti confetti-two"></span><span class="confetti confetti-three"></span><span class="confetti confetti-four"></span>
+            <span class="confetti confetti-five"></span><span class="confetti confetti-six"></span><span class="confetti confetti-seven"></span><span class="confetti confetti-eight"></span>
+            <svg class="modal-success-icon" viewBox="0 0 80 80" fill="none" aria-hidden="true">
+              <defs><linearGradient id="success-gold" x1="12" y1="14" x2="68" y2="68"><stop stop-color="#FFE8A2"/><stop offset=".55" stop-color="#FFC63E"/><stop offset="1" stop-color="#E99B00"/></linearGradient></defs>
+              <circle cx="40" cy="40" r="32" fill="url(#success-gold)"/><circle cx="40" cy="40" r="27" stroke="white" stroke-opacity=".55"/>
+              <path d="M25 40.5 35.5 51 56 30" stroke="#221600" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <svg class="modal-notice-icon" viewBox="0 0 80 80" fill="none" aria-hidden="true">
+              <circle cx="40" cy="40" r="32" fill="#F9BD36"/><circle cx="40" cy="40" r="27" stroke="white" stroke-opacity=".5"/>
+              <path d="M40 24v21" stroke="#221600" stroke-width="5" stroke-linecap="round"/><circle cx="40" cy="56" r="3" fill="#221600"/>
+            </svg>
+          </div>
+          <span class="modal-eyebrow">OPG SERVICES SURVEY</span>
+          <h2 id="modal-title">Response saved</h2>
+          <p id="modal-message">Your response has been saved successfully.</p>
+          <button id="modal-close" class="modal-button" type="button">Done</button>
+        </div>
+      </div>
     </main>
     <script type="module" src="/src/main.js"></script>
   </body>
