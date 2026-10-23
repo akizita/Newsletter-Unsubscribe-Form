@@ -306,7 +306,7 @@ form.addEventListener('submit', async (event) => {
         state: 'success',
         title: 'Response Saved',
         message: 'Your response has been saved successfully.',
-        action: 'Start again',
+        action: 'Done',
         returnFocus: caption,
       });
     } else {

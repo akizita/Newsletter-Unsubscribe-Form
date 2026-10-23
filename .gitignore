@@ -6,3 +6,5 @@ test-artifacts/
 !.env.example
 *.local
 .DS_Store
+
+.vercel
