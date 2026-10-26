@@ -59,7 +59,17 @@ async function acknowledgePrivacy(page, captureCheckedState = false) {
 }
 
 async function assertSplashFits(page) {
-  for (const viewport of viewports) {
+  const splashViewports = [
+    ...viewports,
+    { width: 280, height: 480 },
+    { width: 280, height: 375 },
+    { width: 599, height: 600 },
+    { width: 600, height: 600 },
+    { width: 768, height: 1024 },
+    { width: 900, height: 600 },
+    { width: 901, height: 601 },
+  ];
+  for (const viewport of splashViewports) {
     await page.setViewportSize(viewport);
     await page.reload();
     await page.waitForFunction(() => document.querySelector('#splash-screen').classList.contains('is-fallback'));
@@ -96,7 +106,7 @@ async function assertSplashFits(page) {
     assert.equal(layout.boxShadow, 'none', `${viewport.width}x${viewport.height} splash has no card shadow`);
     assert.ok(layout.markWidth >= (viewport.width >= 1000 ? 180 : 75), `${viewport.width}x${viewport.height} logo is prominent`);
     assert.ok(layout.markWidth > layout.wordmarkHeight, `${viewport.width}x${viewport.height} logo is larger than the two-line wordmark`);
-    if (viewport.width === 1366 || viewport.width === 667 || (viewport.width === 390 && viewport.height === 844)) {
+    if (viewport.width === 1366 || viewport.width === 667 || viewport.width === 280 || viewport.width === 768 || (viewport.width === 390 && viewport.height === 844)) {
       await page.screenshot({ path: join('test-artifacts', `survey-splash-full-${viewport.width}.png`) });
     }
   }
@@ -180,7 +190,7 @@ test('responsive survey uses custom dropdowns and modals while preserving saved 
       return { opacity: Number(getComputedStyle(element).opacity), filter: getComputedStyle(element).filter, right: rect.right, panelRight: panel.right };
     });
     assert.equal(wordmark.opacity > .9, true);
-    assert.match(wordmark.filter, /blur\(0px\)/);
+    assert.equal(wordmark.filter, 'none', 'small-screen artwork does not animate a blur filter');
     assert.equal(wordmark.right <= wordmark.panelRight + 1, true);
     await page.locator('#splash-screen').waitFor({ state: 'hidden' });
     assert.equal(await page.locator('.survey-card').evaluate((card) => card.inert), false);
@@ -224,11 +234,30 @@ test('responsive survey uses custom dropdowns and modals while preserving saved 
       await page.screenshot({ path: join('test-artifacts', `survey-video-splash-wide-${viewport.width}.png`) });
     }
     await page.setViewportSize({ width: 390, height: 844 });
+    let mobileVideoRequests = 0;
+    await page.route('**/assets/opg-afterfx.mp4*', (route) => {
+      mobileVideoRequests += 1;
+      return route.abort();
+    });
+    await page.reload();
+    await page.waitForFunction(() => document.querySelector('#splash-screen').classList.contains('is-lightweight'));
+    assert.equal(await page.locator('#splash-screen').evaluate((screen) => screen.classList.contains('is-video-playing')), false);
+    assert.equal(await page.locator('#splash-video').evaluate((video) => video.paused), true);
+    assert.equal(await page.locator('.splash-poster').getAttribute('src'), null, 'small screens do not load the desktop poster');
+    assert.equal(await page.locator('#splash-video source').getAttribute('src'), null, 'small screens do not attach the video source');
+    await page.waitForTimeout(1400);
+    await page.screenshot({ path: join('test-artifacts', 'survey-splash-mobile-390.png') });
+    await page.locator('#splash-screen').waitFor({ state: 'hidden' });
+    assert.equal(mobileVideoRequests, 0, 'small screens never request or decode the full-HD splash video');
+    await page.unroute('**/assets/opg-afterfx.mp4*');
+    await page.setViewportSize({ width: 1366, height: 768 });
     await page.reload();
     await page.waitForFunction(() => document.querySelector('#splash-screen').classList.contains('is-video-playing'));
-    await page.waitForTimeout(1400);
-    await page.screenshot({ path: join('test-artifacts', 'survey-video-splash-mobile-390.png') });
-    await page.locator('#splash-screen').waitFor({ state: 'hidden' });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForFunction(() => document.querySelector('#splash-screen').classList.contains('is-lightweight'));
+    assert.equal(await page.locator('#splash-video').evaluate((video) => video.paused), true, 'resizing to a small screen stops video playback');
+    assert.equal(await page.locator('#splash-video source').getAttribute('src'), null, 'resizing detaches the video source');
+    await page.locator('#splash-screen').waitFor({ state: 'hidden', timeout: 3500 });
     assert.equal(await page.locator('.survey-card').evaluate((card) => card.inert), false);
     assert.match(await page.locator('#page-title').evaluate((title) => getComputedStyle(title).fontFamily), /Heavitas/);
     assert.equal(await page.locator('.brand img').evaluate((img) => img.naturalWidth > 0), true);
@@ -428,6 +457,20 @@ test('responsive survey uses custom dropdowns and modals while preserving saved 
     await page.locator('#feedback-modal').waitFor({ state: 'visible' });
     assert.equal(await page.locator('#modal-message').textContent(), 'The contact record of your organization has been updated, and all further outreach will cease immediately.');
     assert.equal(payloads.length, 4);
+
+    const touchPage = await browser.newPage({ viewport: { width: 1024, height: 768 }, hasTouch: true, isMobile: true });
+    let touchVideoRequests = 0;
+    await touchPage.route('**/assets/opg-afterfx.mp4*', (route) => {
+      touchVideoRequests += 1;
+      return route.abort();
+    });
+    await touchPage.goto(server.resolvedUrls.local[0]);
+    assert.equal(await touchPage.evaluate(() => matchMedia('(pointer: coarse)').matches), true);
+    assert.equal(await touchPage.locator('#splash-screen').evaluate((screen) => screen.classList.contains('is-lightweight')), true, 'touch devices use the lightweight splash');
+    assert.equal(await touchPage.locator('.splash-poster').getAttribute('src'), null);
+    await touchPage.locator('#splash-screen').waitFor({ state: 'hidden' });
+    assert.equal(touchVideoRequests, 0);
+    await touchPage.close();
 
     const reducedMotionPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
     await reducedMotionPage.goto(server.resolvedUrls.local[0]);
