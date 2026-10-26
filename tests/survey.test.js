@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildPayload, classifyResponse } from '../src/survey.js';
+import { buildPayload, classifyResponse, confirmationFor, PAUSE_CONFIRMATION, CEASE_CONFIRMATION } from '../src/survey.js';
 import { prepareResponse, validateSurveyRequest } from '../automation/workflow-logic.js';
 
 const responseId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
@@ -46,4 +46,11 @@ test('frontend accepts only the saved response contract', () => {
   assert.equal(classifyResponse(200, 'not-json'), 'error');
   assert.equal(classifyResponse(200, { ok: true }), 'error');
   assert.equal(classifyResponse(500, null), 'error');
+});
+
+test('confirmation follows the answer to future interest', () => {
+  assert.equal(confirmationFor('Yes'), PAUSE_CONFIRMATION);
+  assert.equal(confirmationFor('Unsure'), PAUSE_CONFIRMATION);
+  assert.equal(confirmationFor('No'), CEASE_CONFIRMATION);
+  assert.throws(() => confirmationFor('Maybe'));
 });

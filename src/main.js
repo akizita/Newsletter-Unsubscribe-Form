@@ -1,7 +1,8 @@
-import { buildPayload, classifyResponse, SUBMISSION_ERROR_MESSAGE } from './survey.js';
+import { buildPayload, classifyResponse, confirmationFor, SUBMISSION_ERROR_MESSAGE } from './survey.js';
 
 const card = document.querySelector('.survey-card');
 const splash = document.querySelector('#splash-screen');
+const splashVideo = document.querySelector('#splash-video');
 const form = document.querySelector('#survey-form');
 const steps = [...form.querySelectorAll('[data-form-step]')];
 const caption = document.querySelector('#step-caption');
@@ -11,6 +12,12 @@ const modalPanel = modal.querySelector('.modal-panel');
 const modalTitle = document.querySelector('#modal-title');
 const modalMessage = document.querySelector('#modal-message');
 const modalClose = document.querySelector('#modal-close');
+const privacyContent = document.querySelector('#privacy-content');
+const privacyActions = document.querySelector('#privacy-actions');
+const privacyScrollHint = document.querySelector('#privacy-scroll-hint');
+const privacyAcknowledgment = document.querySelector('#privacy-ack');
+const privacyCancel = document.querySelector('#privacy-cancel');
+const privacyConfirm = document.querySelector('#privacy-confirm');
 const button = document.querySelector('#submit-button');
 const buttonLabel = button.querySelector('.button-label');
 const backButtons = [...form.querySelectorAll('[data-back]')];
@@ -25,12 +32,17 @@ let requestId;
 let submitting = false;
 let submitted = false;
 let splashFinished = false;
+let splashTimer;
+let splashStartupTimer;
 let modalReturnFocus;
 const dropdownControllers = [];
 
 function dismissSplash() {
   if (splashFinished) return;
   splashFinished = true;
+  window.clearTimeout(splashTimer);
+  window.clearTimeout(splashStartupTimer);
+  splashVideo.pause();
   card.inert = false;
   card.classList.add('is-ready');
   splash.classList.add('is-leaving');
@@ -42,7 +54,32 @@ function dismissSplash() {
 if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
   dismissSplash();
 } else {
-  window.setTimeout(dismissSplash, 3800);
+  function showSplashFallback() {
+    if (splashFinished || splash.classList.contains('is-video-playing') || splash.classList.contains('is-fallback')) return;
+    window.clearTimeout(splashStartupTimer);
+    splashVideo.pause();
+    splash.classList.add('is-fallback');
+    splashTimer = window.setTimeout(dismissSplash, 3400);
+  }
+
+  function showSplashVideo() {
+    if (splashFinished || splash.classList.contains('is-fallback')) return;
+    window.clearTimeout(splashStartupTimer);
+    splash.classList.add('is-video-playing');
+    splashTimer = window.setTimeout(dismissSplash, 3400);
+  }
+
+  splashVideo.addEventListener('playing', () => {
+    if (splashFinished || splash.classList.contains('is-fallback')) return;
+    if (splashVideo.requestVideoFrameCallback) {
+      splashVideo.requestVideoFrameCallback(showSplashVideo);
+    } else {
+      window.requestAnimationFrame(showSplashVideo);
+    }
+  }, { once: true });
+  splashVideo.addEventListener('error', showSplashFallback);
+  splashStartupTimer = window.setTimeout(showSplashFallback, 2500);
+  splashVideo.play().catch(showSplashFallback);
 }
 
 function openModal({ state = 'notice', title, message, action = 'OK', returnFocus = caption }) {
@@ -52,9 +89,32 @@ function openModal({ state = 'notice', title, message, action = 'OK', returnFocu
   modalTitle.textContent = title;
   modalMessage.textContent = message;
   modalClose.textContent = action;
+  const isPrivacy = state === 'privacy';
+  privacyContent.hidden = !isPrivacy;
+  privacyActions.hidden = !isPrivacy;
+  modalClose.hidden = isPrivacy;
+  if (isPrivacy) {
+    privacyAcknowledgment.checked = false;
+    privacyAcknowledgment.disabled = true;
+    privacyConfirm.disabled = true;
+    privacyScrollHint.hidden = false;
+  }
   card.inert = true;
   modal.hidden = false;
-  modalClose.focus({ preventScroll: true });
+  if (isPrivacy) {
+    privacyContent.scrollTop = 0;
+    updatePrivacyReadiness();
+    privacyContent.focus({ preventScroll: true });
+  } else {
+    modalClose.focus({ preventScroll: true });
+  }
+}
+
+function updatePrivacyReadiness() {
+  if (modalPanel.dataset.state !== 'privacy' || !privacyAcknowledgment.disabled) return;
+  if (privacyContent.scrollTop + privacyContent.clientHeight < privacyContent.scrollHeight - 2) return;
+  privacyAcknowledgment.disabled = false;
+  privacyScrollHint.hidden = true;
 }
 
 function closeModal() {
@@ -71,6 +131,16 @@ function closeModal() {
 }
 
 modalClose.addEventListener('click', closeModal);
+privacyCancel.addEventListener('click', closeModal);
+privacyContent.addEventListener('scroll', updatePrivacyReadiness);
+privacyAcknowledgment.addEventListener('change', () => {
+  privacyConfirm.disabled = !privacyAcknowledgment.checked;
+});
+privacyConfirm.addEventListener('click', () => {
+  if (modalPanel.dataset.state !== 'privacy' || !privacyAcknowledgment.checked || privacyConfirm.disabled) return;
+  closeModal();
+  void submitResponse();
+});
 modal.addEventListener('click', (event) => {
   if (event.target === modal) closeModal();
 });
@@ -79,8 +149,15 @@ modal.addEventListener('keydown', (event) => {
     event.preventDefault();
     closeModal();
   } else if (event.key === 'Tab') {
-    event.preventDefault();
-    modalClose.focus();
+    const focusable = [...modalPanel.querySelectorAll('button, input[type="checkbox"], [tabindex="0"]')]
+      .filter((element) => !element.disabled && element.getClientRects().length);
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if ((event.shiftKey && (document.activeElement === first || !focusable.includes(document.activeElement)))
+      || (!event.shiftKey && document.activeElement === last)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first)?.focus();
+    }
   }
 });
 
@@ -237,7 +314,7 @@ function validateStep(index) {
       return false;
     }
     if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email)) {
-      showNotice('Check your email', 'Please enter a valid email address to continue.', emailField);
+      showNotice('Check your work email', 'Please enter a valid work email address to continue.', emailField);
       return false;
     }
     return true;
@@ -259,15 +336,7 @@ backButtons.forEach((backButton) => {
   backButton.addEventListener('click', () => setStep(step - 1));
 });
 
-form.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  if (submitting || submitted) return;
-  if (step < 2) {
-    if (validateStep(step)) setStep(step + 1);
-    return;
-  }
-  if (!validateStep(2)) return;
-
+async function submitResponse() {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 15000);
 
@@ -305,7 +374,7 @@ form.addEventListener('submit', async (event) => {
       openModal({
         state: 'success',
         title: 'Response Saved',
-        message: 'Your response has been saved successfully.',
+        message: confirmationFor(payload.question2),
         action: 'Done',
         returnFocus: caption,
       });
@@ -327,4 +396,20 @@ form.addEventListener('submit', async (event) => {
     button.disabled = submitted;
     backButtons.forEach((backButton) => { backButton.disabled = false; });
   }
+}
+
+form.addEventListener('submit', (event) => {
+  event.preventDefault();
+  if (submitting || submitted || !modal.hidden) return;
+  if (step < 2) {
+    if (validateStep(step)) setStep(step + 1);
+    return;
+  }
+  if (!validateStep(2)) return;
+  openModal({
+    state: 'privacy',
+    title: 'Data Privacy Disclaimer',
+    message: 'Review the notice below before submitting your response.',
+    returnFocus: button,
+  });
 });

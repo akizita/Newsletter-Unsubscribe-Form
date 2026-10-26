@@ -41,10 +41,28 @@ async function assertFits(page, label, selector = '.survey-card') {
   }
 }
 
+async function acknowledgePrivacy(page, captureCheckedState = false) {
+  assert.equal(await page.locator('.modal-panel').getAttribute('data-state'), 'privacy');
+  await page.locator('#privacy-content').evaluate((content) => { content.scrollTop = content.scrollHeight; });
+  await page.waitForFunction(() => !document.querySelector('#privacy-ack').disabled);
+  await page.locator('#privacy-ack').check();
+  assert.match(await page.locator('#privacy-ack').evaluate((input) => getComputedStyle(input).backgroundImage), /data:image\/svg\+xml/);
+  if (captureCheckedState) {
+    await page.locator('.modal-panel').evaluate((panel) => {
+      for (const animation of panel.getAnimations({ subtree: true })) {
+        if (animation.effect?.getTiming().iterations === 1) animation.finish();
+      }
+    });
+    await page.screenshot({ path: join('test-artifacts', 'survey-privacy-checked-mobile-320.png') });
+  }
+  await page.getByRole('button', { name: 'Confirm and submit' }).click();
+}
+
 async function assertSplashFits(page) {
   for (const viewport of viewports) {
     await page.setViewportSize(viewport);
     await page.reload();
+    await page.waitForFunction(() => document.querySelector('#splash-screen').classList.contains('is-fallback'));
     await page.evaluate(() => document.fonts.ready);
     assert.equal(await page.evaluate(() => document.fonts.check('32px Heavitas')), true, 'Heavitas webfont loads');
     await page.locator('.splash-content').evaluate((panel) => {
@@ -113,6 +131,7 @@ test('responsive survey uses custom dropdowns and modals while preserving saved 
       browserRequests.push({ url: request.url(), headers: request.headers(), body: JSON.parse(request.postData()) });
     });
 
+    await page.route('**/assets/opg-afterfx.mp4*', (route) => route.abort());
     await page.goto(server.resolvedUrls.local[0]);
     mkdirSync('test-artifacts', { recursive: true });
     assert.equal(await page.locator('#splash-screen').isVisible(), true);
@@ -123,6 +142,10 @@ test('responsive survey uses custom dropdowns and modals while preserving saved 
     await assertSplashFits(page);
     await page.setViewportSize({ width: 390, height: 844 });
     await page.reload();
+    await page.waitForFunction(() => document.querySelector('#splash-screen').classList.contains('is-fallback'));
+    await page.waitForFunction(() => Number(getComputedStyle(document.querySelector('.splash-content')).opacity) > .9);
+    assert.equal(await page.locator('.splash-content').isVisible(), true, 'fallback artwork appears when the video fails');
+    assert.equal(await page.locator('.splash-poster').evaluate((poster) => Number(getComputedStyle(poster).opacity)), 0, 'poster does not overlap fallback artwork');
     assert.equal(await page.locator('.splash-mark-light').evaluate((img) => img.naturalWidth > 0), true);
     assert.equal(await page.locator('.splash-mark-gold').evaluate((img) => img.naturalWidth > 0), true);
     const logoBounds = await page.locator('.splash-mark img').evaluateAll((images) => images.map((image) => {
@@ -143,11 +166,6 @@ test('responsive survey uses custom dropdowns and modals while preserving saved 
       return { width: canvas.width, height: canvas.height, left, top, right, bottom };
     }));
     assert.deepEqual(logoBounds[0], logoBounds[1], 'white and gold logo have identical visible bounds');
-    await page.waitForTimeout(600);
-    await page.screenshot({ path: join('test-artifacts', 'survey-splash-mobile-390.png') });
-    assert.equal(await page.locator('.splash-mark-gold').evaluate((img) => Number(getComputedStyle(img).opacity) < .1), true);
-    await page.waitForTimeout(1000);
-    await page.screenshot({ path: join('test-artifacts', 'survey-splash-reveal-mobile-390.png') });
     await page.locator('.splash-content').evaluate((panel) => {
       for (const animation of panel.getAnimations({ subtree: true })) {
         if (animation.effect?.getTiming().iterations === 1) animation.finish();
@@ -166,12 +184,60 @@ test('responsive survey uses custom dropdowns and modals while preserving saved 
     assert.equal(wordmark.right <= wordmark.panelRight + 1, true);
     await page.locator('#splash-screen').waitFor({ state: 'hidden' });
     assert.equal(await page.locator('.survey-card').evaluate((card) => card.inert), false);
+    await page.unroute('**/assets/opg-afterfx.mp4*');
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await page.reload();
+    await page.waitForFunction(() => document.querySelector('#splash-screen').classList.contains('is-video-playing'));
+    assert.equal(await page.locator('#splash-screen').evaluate((screen) => screen.classList.contains('is-fallback')), false);
+    assert.equal(await page.locator('.splash-content').isVisible(), false, 'fallback logo never overlaps the video');
+    assert.equal(await page.locator('.splash-poster').evaluate((poster) => poster.naturalWidth === 1920), true);
+    await page.waitForFunction(() => Number(getComputedStyle(document.querySelector('.splash-poster')).opacity) < .01);
+    assert.deepEqual(await page.locator('#splash-video').evaluate((video) => [video.videoWidth, video.videoHeight]), [1920, 1080]);
+    assert.ok(Math.abs(await page.locator('#splash-video').evaluate((video) => video.duration) - 4) < .1, 'updated four-second animation is served');
+    const videoBackground = await page.locator('#splash-video').evaluate((video) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 1;
+      const context = canvas.getContext('2d');
+      context.drawImage(video, 0, 0, 1, 1, 0, 0, 1, 1);
+      return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3);
+    });
+    assert.ok(videoBackground.every((channel) => channel < 20), `video background is dark: ${videoBackground}`);
+    await page.waitForTimeout(1400);
+    await page.screenshot({ path: join('test-artifacts', 'survey-video-splash-desktop-1366.png') });
+    for (const viewport of [{ width: 2560, height: 1080 }, { width: 3440, height: 1440 }]) {
+      await page.setViewportSize(viewport);
+      const wideSplash = await page.evaluate(() => {
+        const screen = document.querySelector('#splash-screen');
+        const video = document.querySelector('#splash-video');
+        return {
+          screenWidth: screen.getBoundingClientRect().width,
+          screenHeight: screen.getBoundingClientRect().height,
+          videoWidth: video.getBoundingClientRect().width,
+          videoHeight: video.getBoundingClientRect().height,
+          blend: getComputedStyle(video).mixBlendMode,
+          background: getComputedStyle(screen).backgroundImage,
+        };
+      });
+      assert.deepEqual([wideSplash.screenWidth, wideSplash.screenHeight, wideSplash.videoWidth, wideSplash.videoHeight], [viewport.width, viewport.height, viewport.width, viewport.height]);
+      assert.equal(wideSplash.blend, 'screen', 'video background blends with the full-width splash');
+      assert.match(wideSplash.background, /radial-gradient/);
+      await page.screenshot({ path: join('test-artifacts', `survey-video-splash-wide-${viewport.width}.png`) });
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload();
+    await page.waitForFunction(() => document.querySelector('#splash-screen').classList.contains('is-video-playing'));
+    await page.waitForTimeout(1400);
+    await page.screenshot({ path: join('test-artifacts', 'survey-video-splash-mobile-390.png') });
+    await page.locator('#splash-screen').waitFor({ state: 'hidden' });
+    assert.equal(await page.locator('.survey-card').evaluate((card) => card.inert), false);
     assert.match(await page.locator('#page-title').evaluate((title) => getComputedStyle(title).fontFamily), /Heavitas/);
     assert.equal(await page.locator('.brand img').evaluate((img) => img.naturalWidth > 0), true);
     assert.equal(await page.getByText(/unsubscribe/i).count(), 0);
     assert.equal(await page.locator('#name').getAttribute('placeholder'), 'Enter your full name');
-    assert.equal(await page.locator('#email').getAttribute('placeholder'), 'you@example.com');
+    assert.equal(await page.locator('label[for="email"]').textContent(), 'Work Email');
+    assert.equal(await page.locator('#email').getAttribute('placeholder'), 'you@company.com');
     await page.setViewportSize({ width: 1366, height: 768 });
+    assert.equal(Math.round(await page.locator('.survey-card').evaluate((card) => card.getBoundingClientRect().width)), 800);
     const heading = await page.locator('#page-title').evaluate((title) => ({
       height: title.getBoundingClientRect().height,
       lineHeight: parseFloat(getComputedStyle(title).lineHeight),
@@ -208,7 +274,7 @@ test('responsive survey uses custom dropdowns and modals while preserving saved 
     await page.locator('#name').fill('Example Person');
     await page.locator('#email').fill('person@example');
     await page.getByRole('button', { name: 'Continue' }).click();
-    assert.match(await page.locator('#modal-title').textContent(), /Check your email/);
+    assert.match(await page.locator('#modal-title').textContent(), /Check your work email/);
     await page.getByRole('button', { name: 'OK' }).click();
     await page.locator('#email').fill('person@example.com');
     await page.getByRole('button', { name: 'Continue' }).click();
@@ -253,6 +319,11 @@ test('responsive survey uses custom dropdowns and modals while preserving saved 
     assert.equal(await page.locator('#question2').inputValue(), 'Unsure');
 
     await page.setViewportSize({ width: 320, height: 480 });
+    await page.locator('#question2-trigger').click();
+    await page.getByRole('option', { name: 'No' }).click();
+    assert.equal(await page.locator('#question2').inputValue(), 'No');
+    await page.locator('#question2-trigger').click();
+    await page.getByRole('option', { name: 'Unsure' }).click();
     await page.screenshot({ path: join('test-artifacts', 'survey-mobile-short-320.png') });
     await page.setViewportSize({ width: 1366, height: 768 });
     await page.screenshot({ path: join('test-artifacts', 'survey-desktop-1366.png') });
@@ -260,7 +331,30 @@ test('responsive survey uses custom dropdowns and modals while preserving saved 
     assert.match(await page.locator('.back-button').last().evaluate((button) => getComputedStyle(button).backgroundImage), /linear-gradient/);
     assert.equal(await page.locator('button').evaluateAll((buttons) => buttons.some((button) => button.textContent.includes('→'))), false);
 
+    await page.setViewportSize({ width: 320, height: 480 });
     await page.getByRole('button', { name: 'Submit response' }).click();
+    await page.locator('#feedback-modal').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('.modal-panel').getAttribute('data-state'), 'privacy');
+    assert.match(await page.locator('#privacy-content').textContent(), /By submitting this form, you authorize Outsourced Pro Global/);
+    assert.equal(await page.locator('#privacy-content li').count(), 3);
+    assert.equal(payloads.length, 0, 'opening the privacy step does not submit');
+    assert.equal(await page.locator('#privacy-ack').isDisabled(), true);
+    assert.equal(await page.locator('#privacy-confirm').isDisabled(), true);
+    await page.locator('.modal-panel').evaluate((panel) => {
+      for (const animation of panel.getAnimations({ subtree: true })) {
+        if (animation.effect?.getTiming().iterations === 1) animation.finish();
+      }
+    });
+    await page.screenshot({ path: join('test-artifacts', 'survey-privacy-modal-mobile-320.png') });
+    await assertFits(page, 'privacy modal', '.modal-panel');
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#feedback-modal').isVisible(), false);
+    assert.equal(payloads.length, 0, 'closing the privacy step does not submit');
+    await page.setViewportSize({ width: 320, height: 480 });
+    await page.getByRole('button', { name: 'Submit response' }).click();
+    assert.equal(await page.locator('#privacy-ack').isDisabled(), true, 'reopening starts before acknowledgment');
+    assert.equal(await page.locator('#privacy-content').evaluate((content) => content.scrollTop), 0);
+    await acknowledgePrivacy(page, true);
     await page.locator('#feedback-modal').waitFor({ state: 'visible' });
     assert.match(await page.locator('#modal-title').textContent(), /could not save/);
     assert.equal(payloads.length, 1);
@@ -278,9 +372,10 @@ test('responsive survey uses custom dropdowns and modals while preserving saved 
     assert.equal(await page.getByRole('button', { name: 'Submit response' }).isEnabled(), true);
 
     await page.getByRole('button', { name: 'Submit response' }).click();
+    await acknowledgePrivacy(page);
     await page.locator('#feedback-modal').waitFor({ state: 'visible' });
     assert.equal(await page.locator('.modal-panel').getAttribute('data-state'), 'success');
-    assert.match(await page.locator('#modal-message').textContent(), /response has been saved successfully/);
+    assert.equal(await page.locator('#modal-message').textContent(), 'The contact record of your organization has been updated, and all further outreach will pause immediately.');
     assert.equal(await page.locator('.modal-success-icon').isVisible(), true);
     assert.equal(payloads.length, 2);
     assert.equal(payloads[0].responseId, payloads[1].responseId, 'retry must update one row');
@@ -288,7 +383,7 @@ test('responsive survey uses custom dropdowns and modals while preserving saved 
     await assertFits(page, 'success modal', '.modal-panel');
     await page.setViewportSize({ width: 390, height: 844 });
     await page.screenshot({ path: join('test-artifacts', 'survey-success-modal-mobile-390.png') });
-    await page.getByRole('button', { name: 'Start again' }).click();
+    await page.getByRole('button', { name: 'Done' }).click();
     assert.equal(await page.locator('#feedback-modal').isVisible(), false);
     assert.equal(await page.locator('#survey-form').isVisible(), true);
     assert.match(await page.locator('#step-caption').textContent(), /Step 1 of 3/);
@@ -311,16 +406,34 @@ test('responsive survey uses custom dropdowns and modals while preserving saved 
     await page.locator('#question2-trigger').click();
     await page.getByRole('option', { name: 'Yes' }).click();
     await page.getByRole('button', { name: 'Submit response' }).click();
+    await acknowledgePrivacy(page);
     await page.locator('#feedback-modal').waitFor({ state: 'visible' });
     assert.equal(await page.locator('.modal-panel').getAttribute('data-state'), 'success');
+    assert.equal(await page.locator('#modal-message').textContent(), 'The contact record of your organization has been updated, and all further outreach will pause immediately.');
     assert.equal(payloads.length, 3);
     assert.notEqual(payloads[2].responseId, payloads[1].responseId, 'a new survey needs a new response ID');
     assert.equal(payloads[2].email, 'another@example.com');
+
+    await page.getByRole('button', { name: 'Done' }).click();
+    await page.locator('#name').fill('Third Person');
+    await page.locator('#email').fill('third@company.com');
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await page.locator('#question1-trigger').click();
+    await page.getByRole('option', { name: 'Not a priority at this time.' }).click();
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await page.locator('#question2-trigger').click();
+    await page.getByRole('option', { name: 'No' }).click();
+    await page.getByRole('button', { name: 'Submit response' }).click();
+    await acknowledgePrivacy(page);
+    await page.locator('#feedback-modal').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#modal-message').textContent(), 'The contact record of your organization has been updated, and all further outreach will cease immediately.');
+    assert.equal(payloads.length, 4);
 
     const reducedMotionPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
     await reducedMotionPage.goto(server.resolvedUrls.local[0]);
     await reducedMotionPage.locator('#splash-screen').waitFor({ state: 'hidden' });
     assert.equal(await reducedMotionPage.locator('.survey-card').evaluate((element) => element.inert), false);
+    assert.equal(await reducedMotionPage.locator('#splash-video').evaluate((video) => video.paused), true);
     assert.ok(await reducedMotionPage.locator('[data-form-step="0"]').evaluate((panel) => parseFloat(getComputedStyle(panel).animationDuration) < .01));
     await reducedMotionPage.close();
   } finally {

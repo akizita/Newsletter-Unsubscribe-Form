@@ -1,6 +1,10 @@
 # OPG services survey
 
-This is a public, three-step survey for a name, email address, and two fixed-choice answers. It records responses in Google Sheets through n8n. It does not unsubscribe anyone or stop Gmail outreach automatically. The confirmation only says the response was recorded.
+This is a public, three-step survey for a name, work email address, and two fixed-choice answers. It records responses in Google Sheets through n8n. The form labels the email field as Work Email. Submitting the final step opens a data privacy modal; the user must scroll through the notice and acknowledge it before the request is sent. After a successful save, the confirmation says outreach will pause for Yes or Unsure and cease for No.
+
+The splash uses `public/assets/opg-afterfx.mp4`, a four-second H.264 version of `Asset/OPG_AfterFX.mov`. The source MOV has a white background and uses ProRes, so the web version replaces the neutral background with black while preserving the gold logo. The first video frame is also saved as `public/assets/opg-afterfx-poster.png`. Full-viewport gold gradients sit behind the video and poster; their black frames blend into the background at wider aspect ratios. The earlier CSS splash appears if video playback fails; reduced-motion visitors proceed directly to the form. When replacing the source MOV, regenerate both public assets together so the first frame and video match, then update their shared cache version in `index.html`.
+
+**Operational requirement:** The workflow in this repository only saves the response. It does not unsubscribe anyone, update a separate organization contact record, or stop Gmail outreach automatically. Connect the saved answers to the actual suppression and outreach systems before deploying the new confirmation wording; otherwise the confirmation promises an action the application cannot verify. The Work Email label is guidance, not proof of business ownership or a restriction on email domains.
 
 ## Architecture
 

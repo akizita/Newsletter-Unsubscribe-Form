@@ -33,6 +33,8 @@ test('production frontend does not contain an n8n URL or authentication secret',
     assert.equal(builtText.includes(marker), false, `${marker} must not appear in dist`);
   }
   assert.equal(builtText.includes('/api/submit'), true);
+  assert.equal(files('dist').some((path) => path.replaceAll('\\', '/').endsWith('/assets/opg-afterfx.mp4')), true);
+  assert.equal(files('dist').some((path) => path.replaceAll('\\', '/').endsWith('/assets/opg-afterfx-poster.png')), true);
 });
 
 test('Vercel config gives the built site a restrictive CSP and security headers', () => {
@@ -41,6 +43,7 @@ test('Vercel config gives the built site a restrictive CSP and security headers'
   assert.equal(config.outputDirectory, 'dist');
   const headers = Object.fromEntries(config.headers[0].headers.map(({ key, value }) => [key.toLowerCase(), value]));
   assert.match(headers['content-security-policy'], /connect-src 'self'/);
+  assert.match(headers['content-security-policy'], /media-src 'self'/);
   assert.match(headers['content-security-policy'], /frame-ancestors 'none'/);
   assert.equal(headers['x-frame-options'], 'DENY');
   assert.equal(headers['x-content-type-options'], 'nosniff');

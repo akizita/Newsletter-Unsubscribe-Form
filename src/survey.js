@@ -8,6 +8,14 @@ export const REASONS = Object.freeze([
 
 export const FUTURE_INTEREST = Object.freeze(['Yes', 'No', 'Unsure']);
 export const SUBMISSION_ERROR_MESSAGE = 'We could not save your response. Please try again in a moment.';
+export const PAUSE_CONFIRMATION = 'The contact record of your organization has been updated, and all further outreach will pause immediately.';
+export const CEASE_CONFIRMATION = 'The contact record of your organization has been updated, and all further outreach will cease immediately.';
+
+export function confirmationFor(question2) {
+  if (question2 === 'No') return CEASE_CONFIRMATION;
+  if (question2 === 'Yes' || question2 === 'Unsure') return PAUSE_CONFIRMATION;
+  throw new Error('Invalid answer to question 2');
+}
 
 export function buildPayload(fields, requestId) {
   const name = String(fields.name ?? '').trim();

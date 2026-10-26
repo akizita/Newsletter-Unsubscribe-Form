@@ -9,12 +9,17 @@
     <title>OPG Services Survey</title>
     <link rel="preload" as="image" href="/assets/opg-splash-light.png" />
     <link rel="preload" as="image" href="/assets/opg-splash-gold.png" />
+    <link rel="preload" as="image" href="/assets/opg-afterfx-poster.png?v=f9e117c0" />
     <link rel="preload" as="font" type="font/ttf" href="/assets/fonts/Heavitas.ttf" crossorigin />
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
     <main class="page-shell">
       <div id="splash-screen" class="splash-screen" role="status" aria-live="polite">
+        <img class="splash-poster" src="/assets/opg-afterfx-poster.png?v=f9e117c0" width="1920" height="1080" alt="" fetchpriority="high" aria-hidden="true" />
+        <video id="splash-video" class="splash-video" muted playsinline preload="none" aria-hidden="true">
+          <source src="/assets/opg-afterfx.mp4?v=f9e117c0" type="video/mp4" />
+        </video>
         <div class="splash-content">
           <div class="splash-brand">
             <span class="splash-mark">
@@ -54,8 +59,8 @@
                 <input id="name" name="name" type="text" autocomplete="name" placeholder="Enter your full name" maxlength="120" required />
               </div>
               <div class="field">
-                <label for="email">Email</label>
-                <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" maxlength="254" required />
+                <label for="email">Work Email</label>
+                <input id="email" name="email" type="email" autocomplete="email" placeholder="you@company.com" maxlength="254" required />
               </div>
             </div>
             <div class="form-actions">
@@ -113,7 +118,6 @@
                 <span class="button-label">Submit response</span>
               </button>
             </div>
-            <p class="submit-note">We’ll use your information to record this survey response.</p>
           </div>
         </form>
       </section>
@@ -136,6 +140,22 @@
           <span class="modal-eyebrow">OPG SERVICES SURVEY</span>
           <h2 id="modal-title">Response saved</h2>
           <p id="modal-message">Your response has been saved successfully.</p>
+          <div id="privacy-content" class="privacy-content" tabindex="0" aria-label="Data privacy details" hidden>
+            <p>By submitting this form, you authorize Outsourced Pro Global to process your request to opt out of communications or update your contact preferences.</p>
+            <ol>
+              <li><strong>Information We Collect:</strong> We collect your contact details (such as your email address) and any optional preferences you provide regarding future contact.</li>
+              <li><strong>How We Use Your Data:</strong> Your information is used to update our suppression lists, cease current marketing communications, and honor your specific instructions for any requested future outreach.</li>
+              <li><strong>Data Storage &amp; Security:</strong> Your data is stored securely in Google Workspace and accessed only by authorized personnel managing our email compliance and lead pipeline. We do not sell, rent, or share your data with third parties.</li>
+            </ol>
+          </div>
+          <div id="privacy-actions" class="privacy-actions" hidden>
+            <p id="privacy-scroll-hint" class="privacy-scroll-hint" hidden>Scroll through the notice to enable acknowledgment.</p>
+            <label class="privacy-acknowledgment" for="privacy-ack"><input id="privacy-ack" type="checkbox" /> I have read and understand this data privacy disclaimer.</label>
+            <div class="privacy-buttons">
+              <button id="privacy-cancel" class="modal-button privacy-cancel" type="button">Back to form</button>
+              <button id="privacy-confirm" class="modal-button" type="button" disabled>Confirm and submit</button>
+            </div>
+          </div>
           <button id="modal-close" class="modal-button" type="button">Done</button>
         </div>
       </div>
