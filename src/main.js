@@ -2,9 +2,6 @@ import { buildPayload, classifyResponse, confirmationFor, SUBMISSION_ERROR_MESSA
 
 const card = document.querySelector('.survey-card');
 const splash = document.querySelector('#splash-screen');
-const splashPoster = document.querySelector('.splash-poster');
-const splashVideo = document.querySelector('#splash-video');
-const splashVideoSource = splashVideo.querySelector('source');
 const form = document.querySelector('#survey-form');
 const steps = [...form.querySelectorAll('[data-form-step]')];
 const caption = document.querySelector('#step-caption');
@@ -35,17 +32,13 @@ let submitting = false;
 let submitted = false;
 let splashFinished = false;
 let splashTimer;
-let splashStartupTimer;
 let modalReturnFocus;
 const dropdownControllers = [];
-const lightweightSplashMedia = window.matchMedia('(max-width: 900px), (max-height: 600px), (pointer: coarse)');
 
 function dismissSplash() {
   if (splashFinished) return;
   splashFinished = true;
   window.clearTimeout(splashTimer);
-  window.clearTimeout(splashStartupTimer);
-  splashVideo.pause();
   card.inert = false;
   card.classList.add('is-ready');
   splash.classList.add('is-leaving');
@@ -57,60 +50,8 @@ function dismissSplash() {
 if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
   dismissSplash();
 } else {
-  function showSplashFallback() {
-    if (splashFinished || splash.classList.contains('is-video-playing') || splash.classList.contains('is-fallback')) return;
-    window.clearTimeout(splashStartupTimer);
-    splashVideo.pause();
-    splash.classList.add('is-fallback');
-    splashTimer = window.setTimeout(dismissSplash, splash.classList.contains('is-lightweight') ? 2200 : 3400);
-  }
-
-  function useLightweightSplash() {
-    if (splashFinished || splash.classList.contains('is-lightweight')) return;
-    splash.classList.add('is-lightweight');
-    splash.classList.remove('is-video-playing');
-    splashVideo.pause();
-    if (splashVideoSource.hasAttribute('src')) {
-      splashVideoSource.removeAttribute('src');
-      splashVideo.load();
-    }
-    splashPoster.removeAttribute('src');
-    window.clearTimeout(splashTimer);
-    if (splash.classList.contains('is-fallback')) {
-      splashTimer = window.setTimeout(dismissSplash, 2200);
-    } else {
-      showSplashFallback();
-    }
-  }
-
-  function showSplashVideo() {
-    if (splashFinished || splash.classList.contains('is-fallback') || splash.classList.contains('is-lightweight')) return;
-    window.clearTimeout(splashStartupTimer);
-    splash.classList.add('is-video-playing');
-    splashTimer = window.setTimeout(dismissSplash, 3400);
-  }
-
-  splashVideo.addEventListener('playing', () => {
-    if (splashFinished || splash.classList.contains('is-fallback') || splash.classList.contains('is-lightweight')) return;
-    if (splashVideo.requestVideoFrameCallback) {
-      splashVideo.requestVideoFrameCallback(showSplashVideo);
-    } else {
-      window.requestAnimationFrame(showSplashVideo);
-    }
-  }, { once: true });
-  splashVideo.addEventListener('error', showSplashFallback);
-  lightweightSplashMedia.addEventListener('change', (event) => {
-    if (event.matches) useLightweightSplash();
-  });
-  if (lightweightSplashMedia.matches) {
-    useLightweightSplash();
-  } else {
-    splashPoster.src = splashPoster.dataset.src;
-    splashVideoSource.src = splashVideoSource.dataset.src;
-    splashVideo.load();
-    splashStartupTimer = window.setTimeout(showSplashFallback, 2500);
-    splashVideo.play().catch(showSplashFallback);
-  }
+  splash.classList.add('is-animating');
+  splashTimer = window.setTimeout(dismissSplash, 2200);
 }
 
 function openModal({ state = 'notice', title, message, action = 'OK', returnFocus = caption }) {
