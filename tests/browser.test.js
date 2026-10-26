@@ -130,7 +130,14 @@ async function assertVideoPlays(page, viewport, filename, dimensions, screenshot
   assert.deepEqual([video.width, video.height], dimensions);
   assert.ok(Math.abs(video.duration - 4) < .1, 'the original four-second animation is retained');
   assert.equal(video.blend, 'normal', 'video does not use expensive screen blending');
-  assert.equal(video.fit, 'contain', 'the full animation fits the viewport');
+  assert.equal(video.fit, 'cover', 'the video background fills the viewport');
+  const backgrounds = await page.evaluate(() => ({
+    splash: getComputedStyle(document.querySelector('.splash-screen')).backgroundImage,
+    form: getComputedStyle(document.querySelector('.page-shell')).backgroundImage,
+    overlay: getComputedStyle(document.querySelector('.splash-screen'), '::after').content,
+  }));
+  assert.equal(backgrounds.splash, backgrounds.form, 'splash and form use the same backdrop');
+  assert.equal(backgrounds.overlay, 'none', 'the extra yellow overlay is removed');
   assert.equal(await page.locator('.splash-content').isVisible(), false, 'CSS fallback does not replace a playing video');
   await page.waitForTimeout(1100);
   assert.ok(await page.locator('#splash-video').evaluate((element) => element.currentTime) > .5, 'video advances without stalling');
@@ -229,11 +236,14 @@ test('responsive survey uses custom dropdowns and modals while preserving saved 
     assert.equal(await page.locator('.survey-card').evaluate((card) => card.inert), false);
     assert.ok(blockedVideoRequests >= 1, 'fallback is exercised when video delivery fails');
     await page.unroute('**/assets/opg-afterfx-*.mp4');
+    await assertVideoPlays(page, { width: 280, height: 700 }, 'opg-afterfx-portrait.mp4', [540, 960], 'survey-video-narrow-280.png');
     await assertVideoPlays(page, { width: 390, height: 844 }, 'opg-afterfx-portrait.mp4', [540, 960], 'survey-video-portrait-390.png');
     await assertVideoPlays(page, { width: 667, height: 375 }, 'opg-afterfx-compact.mp4', [960, 540], 'survey-video-landscape-667.png');
+    await assertVideoPlays(page, { width: 1024, height: 768 }, 'opg-afterfx-compact.mp4', [960, 540], 'survey-video-tablet-1024.png');
     await assertVideoPlays(page, { width: 1366, height: 768 }, 'opg-afterfx-compact.mp4', [960, 540], 'survey-video-laptop-1366.png');
     await assertVideoPlays(page, { width: 1920, height: 1080 }, 'opg-afterfx-desktop.mp4', [1280, 720], 'survey-video-desktop-1920.png');
-    await assertVideoPlays(page, { width: 3440, height: 1440 }, 'opg-afterfx-desktop.mp4', [1280, 720], 'survey-video-wide-3440.png');
+    await assertVideoPlays(page, { width: 2560, height: 1080 }, 'opg-afterfx-wide.mp4', [1720, 720], 'survey-video-wide-2560.png');
+    await assertVideoPlays(page, { width: 3440, height: 1440 }, 'opg-afterfx-wide.mp4', [1720, 720], 'survey-video-wide-3440.png');
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.locator('.survey-card').evaluate((card) => card.inert), false);
     const formRendering = await page.locator('.survey-card').evaluate((card) => ({

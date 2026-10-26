@@ -78,6 +78,8 @@ if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
 
   const videoSource = window.matchMedia('(max-aspect-ratio: 3/4)').matches
     ? '/assets/opg-afterfx-portrait.mp4'
+    : window.matchMedia('(min-aspect-ratio: 2/1)').matches
+      ? '/assets/opg-afterfx-wide.mp4'
     : window.matchMedia('(max-width: 1440px), (max-height: 600px)').matches
       ? '/assets/opg-afterfx-compact.mp4'
       : '/assets/opg-afterfx-desktop.mp4';
