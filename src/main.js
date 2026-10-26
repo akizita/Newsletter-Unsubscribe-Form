@@ -2,6 +2,7 @@ import { buildPayload, classifyResponse, confirmationFor, SUBMISSION_ERROR_MESSA
 
 const card = document.querySelector('.survey-card');
 const splash = document.querySelector('#splash-screen');
+const splashVideo = document.querySelector('#splash-video');
 const form = document.querySelector('#survey-form');
 const steps = [...form.querySelectorAll('[data-form-step]')];
 const caption = document.querySelector('#step-caption');
@@ -32,6 +33,9 @@ let submitting = false;
 let submitted = false;
 let splashFinished = false;
 let splashTimer;
+let splashStartupTimer;
+let splashStallTimer;
+let splashFallbackTimer;
 let modalReturnFocus;
 const dropdownControllers = [];
 
@@ -39,19 +43,63 @@ function dismissSplash() {
   if (splashFinished) return;
   splashFinished = true;
   window.clearTimeout(splashTimer);
+  window.clearTimeout(splashStartupTimer);
+  window.clearTimeout(splashStallTimer);
+  window.clearTimeout(splashFallbackTimer);
+  splashVideo.pause();
   card.inert = false;
   card.classList.add('is-ready');
   splash.classList.add('is-leaving');
   splash.setAttribute('aria-hidden', 'true');
   splash.inert = true;
-  window.setTimeout(() => { splash.hidden = true; }, 400);
+  window.setTimeout(() => {
+    splash.hidden = true;
+    splashVideo.removeAttribute('src');
+    splashVideo.load();
+  }, 400);
 }
 
 if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
   dismissSplash();
 } else {
-  splash.classList.add('is-animating');
-  splashTimer = window.setTimeout(dismissSplash, 2200);
+  function showSplashFallback() {
+    if (splashFinished || splash.classList.contains('is-video-playing') || splash.classList.contains('is-fallback')) return;
+    window.clearTimeout(splashStartupTimer);
+    splashVideo.pause();
+    splash.classList.add('is-fallback', 'is-animating');
+    splashFallbackTimer = window.setTimeout(dismissSplash, 2200);
+  }
+
+  function showSplashVideo() {
+    if (splashFinished || splash.classList.contains('is-fallback')) return;
+    window.clearTimeout(splashStartupTimer);
+    splash.classList.add('is-video-playing');
+  }
+
+  const videoSource = window.matchMedia('(max-aspect-ratio: 3/4)').matches
+    ? '/assets/opg-afterfx-portrait.mp4'
+    : window.matchMedia('(max-width: 1440px), (max-height: 600px)').matches
+      ? '/assets/opg-afterfx-compact.mp4'
+      : '/assets/opg-afterfx-desktop.mp4';
+  splashVideo.addEventListener('playing', () => {
+    window.clearTimeout(splashStallTimer);
+    if (splashVideo.requestVideoFrameCallback) {
+      splashVideo.requestVideoFrameCallback(showSplashVideo);
+    } else {
+      window.requestAnimationFrame(showSplashVideo);
+    }
+  });
+  splashVideo.addEventListener('waiting', () => {
+    if (!splash.classList.contains('is-video-playing')) return;
+    window.clearTimeout(splashStallTimer);
+    splashStallTimer = window.setTimeout(dismissSplash, 1200);
+  });
+  splashVideo.addEventListener('ended', dismissSplash, { once: true });
+  splashVideo.addEventListener('error', showSplashFallback);
+  splashTimer = window.setTimeout(dismissSplash, 5200);
+  splashStartupTimer = window.setTimeout(showSplashFallback, 1800);
+  splashVideo.src = videoSource;
+  splashVideo.play().catch(showSplashFallback);
 }
 
 function openModal({ state = 'notice', title, message, action = 'OK', returnFocus = caption }) {

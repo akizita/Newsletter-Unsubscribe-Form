@@ -114,6 +114,31 @@ async function assertSplashFits(page) {
   }
 }
 
+async function assertVideoPlays(page, viewport, filename, dimensions, screenshotName) {
+  await page.setViewportSize(viewport);
+  await page.reload();
+  await page.waitForFunction(() => document.querySelector('#splash-screen').classList.contains('is-video-playing'));
+  const video = await page.locator('#splash-video').evaluate((element) => ({
+    src: new URL(element.currentSrc).pathname,
+    width: element.videoWidth,
+    height: element.videoHeight,
+    duration: element.duration,
+    blend: getComputedStyle(element).mixBlendMode,
+    fit: getComputedStyle(element).objectFit,
+  }));
+  assert.ok(video.src.endsWith(`/${filename}`), `${viewport.width}x${viewport.height} selects ${filename}`);
+  assert.deepEqual([video.width, video.height], dimensions);
+  assert.ok(Math.abs(video.duration - 4) < .1, 'the original four-second animation is retained');
+  assert.equal(video.blend, 'normal', 'video does not use expensive screen blending');
+  assert.equal(video.fit, 'contain', 'the full animation fits the viewport');
+  assert.equal(await page.locator('.splash-content').isVisible(), false, 'CSS fallback does not replace a playing video');
+  await page.waitForTimeout(1100);
+  assert.ok(await page.locator('#splash-video').evaluate((element) => element.currentTime) > .5, 'video advances without stalling');
+  await page.screenshot({ path: join('test-artifacts', screenshotName) });
+  await page.locator('#splash-screen').waitFor({ state: 'hidden', timeout: 6000 });
+  assert.equal(await page.locator('.survey-card').evaluate((card) => card.inert), false);
+}
+
 test('responsive survey uses custom dropdowns and modals while preserving saved answers', { skip: !existsSync(chromePath) }, async () => {
   const payloads = [];
   const secret = 'browser-test-secret-32-characters-long';
@@ -143,9 +168,9 @@ test('responsive survey uses custom dropdowns and modals while preserving saved 
       browserRequests.push({ url: request.url(), headers: request.headers(), body: JSON.parse(request.postData()) });
     });
 
-    let legacySplashRequests = 0;
-    await page.route('**/assets/opg-afterfx*', (route) => {
-      legacySplashRequests += 1;
+    let blockedVideoRequests = 0;
+    await page.route('**/assets/opg-afterfx-*.mp4', (route) => {
+      blockedVideoRequests += 1;
       return route.abort();
     });
     await page.goto(server.resolvedUrls.local[0]);
@@ -153,12 +178,14 @@ test('responsive survey uses custom dropdowns and modals while preserving saved 
     assert.equal(await page.locator('#splash-screen').isVisible(), true);
     assert.equal(await page.locator('#skip-splash').count(), 0);
     assert.equal(await page.locator('.splash-progress').count(), 0);
-    assert.equal(await page.locator('#splash-video, .splash-poster').count(), 0, 'the splash has no video or poster element');
+    assert.equal(await page.locator('#splash-video').count(), 1, 'the OPG_AfterFX video remains in the splash');
+    assert.equal(await page.locator('.splash-poster').count(), 0);
     assert.deepEqual(await page.locator('.splash-wordmark span').allTextContents(), ['Outsourced', 'Pro Global']);
     assert.equal(await page.locator('.splash-subtext').textContent(), "We're ready to hear what matters to you.");
     await assertSplashFits(page);
     await page.setViewportSize({ width: 390, height: 844 });
     await page.reload();
+    await page.waitForFunction(() => document.querySelector('#splash-screen').classList.contains('is-fallback'));
     await page.waitForFunction(() => document.querySelector('#splash-screen').classList.contains('is-animating'));
     await page.waitForFunction(() => Number(getComputedStyle(document.querySelector('.splash-content')).opacity) > .9);
     assert.equal(await page.locator('.splash-content').isVisible(), true, 'the logo artwork appears on every screen');
@@ -200,14 +227,14 @@ test('responsive survey uses custom dropdowns and modals while preserving saved 
     assert.equal(wordmark.right <= wordmark.panelRight + 1, true);
     await page.locator('#splash-screen').waitFor({ state: 'hidden' });
     assert.equal(await page.locator('.survey-card').evaluate((card) => card.inert), false);
-    await page.setViewportSize({ width: 1366, height: 768 });
-    await page.reload();
-    await page.waitForFunction(() => document.querySelector('#splash-screen').classList.contains('is-animating'));
-    assert.equal(await page.locator('#splash-video, .splash-poster').count(), 0);
-    assert.equal(await page.locator('.splash-lockup').evaluate((element) => getComputedStyle(element).filter), 'none');
+    assert.ok(blockedVideoRequests >= 1, 'fallback is exercised when video delivery fails');
+    await page.unroute('**/assets/opg-afterfx-*.mp4');
+    await assertVideoPlays(page, { width: 390, height: 844 }, 'opg-afterfx-portrait.mp4', [540, 960], 'survey-video-portrait-390.png');
+    await assertVideoPlays(page, { width: 667, height: 375 }, 'opg-afterfx-compact.mp4', [960, 540], 'survey-video-landscape-667.png');
+    await assertVideoPlays(page, { width: 1366, height: 768 }, 'opg-afterfx-compact.mp4', [960, 540], 'survey-video-laptop-1366.png');
+    await assertVideoPlays(page, { width: 1920, height: 1080 }, 'opg-afterfx-desktop.mp4', [1280, 720], 'survey-video-desktop-1920.png');
+    await assertVideoPlays(page, { width: 3440, height: 1440 }, 'opg-afterfx-desktop.mp4', [1280, 720], 'survey-video-wide-3440.png');
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.locator('#splash-screen').waitFor({ state: 'hidden', timeout: 3500 });
-    assert.equal(legacySplashRequests, 0, 'no screen size requests the former video or poster');
     assert.equal(await page.locator('.survey-card').evaluate((card) => card.inert), false);
     const formRendering = await page.locator('.survey-card').evaluate((card) => ({
       blur: getComputedStyle(card).backdropFilter,
@@ -414,38 +441,58 @@ test('responsive survey uses custom dropdowns and modals while preserving saved 
     assert.equal(payloads.length, 4);
 
     const laptopPage = await browser.newPage({ viewport: { width: 1366, height: 768 }, deviceScaleFactor: 2 });
-    let laptopMediaRequests = 0;
-    await laptopPage.route('**/assets/opg-afterfx*', (route) => {
-      laptopMediaRequests += 1;
-      return route.abort();
-    });
     await laptopPage.goto(server.resolvedUrls.local[0]);
     assert.equal(await laptopPage.evaluate(() => devicePixelRatio), 2);
-    assert.equal(await laptopPage.locator('#splash-screen').evaluate((screen) => screen.classList.contains('is-animating')), true);
-    await laptopPage.waitForTimeout(1400);
-    await laptopPage.screenshot({ path: join('test-artifacts', 'survey-splash-laptop-dpr2.png') });
-    await laptopPage.locator('#splash-screen').waitFor({ state: 'hidden', timeout: 3500 });
-    assert.equal(laptopMediaRequests, 0, 'high-DPI laptop view does not request video or poster');
+    await laptopPage.waitForFunction(() => document.querySelector('#splash-screen').classList.contains('is-video-playing'));
+    assert.ok((await laptopPage.locator('#splash-video').evaluate((video) => video.currentSrc)).endsWith('/opg-afterfx-compact.mp4'));
+    await laptopPage.waitForTimeout(1100);
+    await laptopPage.screenshot({ path: join('test-artifacts', 'survey-video-laptop-dpr2.png') });
+    await laptopPage.locator('#splash-screen').waitFor({ state: 'hidden', timeout: 6000 });
     await laptopPage.close();
 
     const touchPage = await browser.newPage({ viewport: { width: 1024, height: 768 }, hasTouch: true, isMobile: true });
-    let touchMediaRequests = 0;
-    await touchPage.route('**/assets/opg-afterfx*', (route) => {
-      touchMediaRequests += 1;
-      return route.abort();
-    });
     await touchPage.goto(server.resolvedUrls.local[0]);
     assert.equal(await touchPage.evaluate(() => matchMedia('(pointer: coarse)').matches), true);
-    assert.equal(await touchPage.locator('#splash-screen').evaluate((screen) => screen.classList.contains('is-animating')), true, 'touch devices use the same splash');
-    await touchPage.locator('#splash-screen').waitFor({ state: 'hidden' });
-    assert.equal(touchMediaRequests, 0);
+    await touchPage.waitForFunction(() => document.querySelector('#splash-screen').classList.contains('is-video-playing'));
+    assert.ok((await touchPage.locator('#splash-video').evaluate((video) => video.currentSrc)).endsWith('/opg-afterfx-compact.mp4'));
+    await touchPage.locator('#splash-screen').waitFor({ state: 'hidden', timeout: 6000 });
     await touchPage.close();
+
+    const movedPage = await browser.newPage({ viewport: { width: 1366, height: 768 } });
+    await movedPage.goto(server.resolvedUrls.local[0]);
+    await movedPage.waitForFunction(() => document.querySelector('#splash-screen').classList.contains('is-video-playing'));
+    const timeBeforeMove = await movedPage.locator('#splash-video').evaluate((video) => video.currentTime);
+    await movedPage.setViewportSize({ width: 1920, height: 1080 });
+    await movedPage.waitForTimeout(350);
+    const movedVideo = await movedPage.locator('#splash-video').evaluate((video) => ({
+      src: new URL(video.currentSrc).pathname,
+      time: video.currentTime,
+      width: video.getBoundingClientRect().width,
+      height: video.getBoundingClientRect().height,
+    }));
+    assert.ok(movedVideo.src.endsWith('/opg-afterfx-compact.mp4'), 'moving between displays does not restart video playback');
+    assert.ok(movedVideo.time > timeBeforeMove);
+    assert.deepEqual([movedVideo.width, movedVideo.height], [1920, 1080]);
+    await movedPage.locator('#splash-screen').waitFor({ state: 'hidden', timeout: 6000 });
+    await movedPage.close();
+
+    const slowPage = await browser.newPage({ viewport: { width: 1366, height: 768 } });
+    await slowPage.route('**/assets/opg-afterfx-compact.mp4', async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      await route.abort();
+    });
+    await slowPage.goto(server.resolvedUrls.local[0], { waitUntil: 'domcontentloaded' });
+    await slowPage.waitForFunction(() => document.querySelector('#splash-screen').classList.contains('is-fallback'), undefined, { timeout: 3500 });
+    await slowPage.locator('#splash-screen').waitFor({ state: 'hidden', timeout: 5000 });
+    assert.equal(await slowPage.locator('.survey-card').evaluate((card) => card.inert), false, 'a stalled video never traps the form');
+    await slowPage.close();
 
     const reducedMotionPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
     await reducedMotionPage.goto(server.resolvedUrls.local[0]);
     await reducedMotionPage.locator('#splash-screen').waitFor({ state: 'hidden' });
     assert.equal(await reducedMotionPage.locator('.survey-card').evaluate((element) => element.inert), false);
     assert.equal(await reducedMotionPage.locator('#splash-screen').evaluate((screen) => screen.classList.contains('is-animating')), false);
+    assert.equal(await reducedMotionPage.locator('#splash-video').evaluate((video) => video.currentSrc), '');
     assert.ok(await reducedMotionPage.locator('[data-form-step="0"]').evaluate((panel) => parseFloat(getComputedStyle(panel).animationDuration) < .01));
     await reducedMotionPage.close();
   } finally {
